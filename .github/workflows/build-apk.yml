@@ -15,6 +15,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history: the build number is the commit count, which needs
+          # more than the single commit a shallow clone gives.
+          fetch-depth: 0
 
       - uses: actions/setup-java@v4
         with:
@@ -46,6 +50,21 @@ jobs:
           echo "Using $DIR"
           echo "dir=$DIR" >> "$GITHUB_OUTPUT"
 
+          # The version name comes from pubspec and only moves when you move
+          # it. The build number is the commit count, so it rises on every
+          # push. Android compares build numbers, and anything watching the
+          # releases for updates compares the file name, so both need to
+          # change or a new build looks identical to the last one.
+          V=$(grep -m1 '^version:' "$DIR/pubspec.yaml" | sed 's/version: *//' | cut -d'+' -f1)
+          BUILD=$(git rev-list --count HEAD)
+          SHA=$(git rev-parse --short HEAD)
+          echo "version=$V"
+          echo "build=$BUILD"
+          echo "sha=$SHA"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
       - name: Scaffold the Android project
         run: |
           # --org sets the Android application ID, here com.kreedah.workout_log.
@@ -61,8 +80,12 @@ jobs:
           # bridge. Everything else under android/ stays generated.
           cp -r "$DIR/platform/android/." /tmp/app/android/
           find /tmp/app/android -name 'MainActivity.kt'
-          sed -i 's/android:label="workout_log"/android:label="Workout Log"/' \
+          # Point the manifest at the string resource rather than writing the
+          # name in here. Keeps the display name in source, and keeps macrons
+          # away from shell escaping.
+          sed -i 's|android:label="workout_log"|android:label="@string/app_name"|' \
             /tmp/app/android/app/src/main/AndroidManifest.xml
+          grep -n 'android:label' /tmp/app/android/app/src/main/AndroidManifest.xml
 
       - name: Dependencies
         working-directory: /tmp/app
@@ -85,7 +108,10 @@ jobs:
       # them. Roughly halves the download; install the arm64-v8a one.
       - name: Build release APK
         working-directory: /tmp/app
-        run: flutter build apk --release --split-per-abi
+        run: |
+          flutter build apk --release --split-per-abi \
+            --build-name='${{ steps.src.outputs.version }}' \
+            --build-number='${{ steps.src.outputs.build }}'
 
       - name: Sizes
         run: ls -lh /tmp/app/build/app/outputs/flutter-apk/*.apk
@@ -116,38 +142,61 @@ jobs:
             "$APKSIGNER" verify --print-certs "$f" | grep -i "SHA-256" | head -1
           done
 
-      # Give the files a name that says what they are, using the version from
-      # pubspec.yaml. app-arm64-v8a-release.apk tells a stranger nothing.
+      # Give the files a name that says what they are and which build they
+      # came from. app-arm64-v8a-release.apk tells a stranger nothing, and a
+      # name that never changes makes two different builds indistinguishable
+      # in a downloads folder.
       - name: Name the builds
         id: ver
         run: |
-          DIR='${{ steps.src.outputs.dir }}'
-          V=$(grep -m1 '^version:' "$DIR/pubspec.yaml" | sed 's/version: *//' | cut -d'+' -f1)
-          echo "version=$V" >> "$GITHUB_OUTPUT"
+          V='${{ steps.src.outputs.version }}'
+          BUILD='${{ steps.src.outputs.build }}'
           mkdir -p /tmp/out
           for f in /tmp/app/build/app/outputs/flutter-apk/*-release.apk; do
             abi=$(basename "$f" | sed 's/^app-//; s/-release\.apk$//')
-            cp "$f" "/tmp/out/wlog-$V-$abi.apk"
+            cp "$f" "/tmp/out/wlog-$V-b$BUILD-$abi.apk"
           done
           ls -lh /tmp/out
 
       # A rolling release on a fixed tag, so there is one permanent link that
       # always points at the current build and can be opened on the phone
       # without signing in. Actions artifacts need a login and expire.
+      #
+      # Pushes usually carry several commits, so the notes list all of them
+      # rather than only the last. github.event.before is the tip before this
+      # push, and is all zeroes the first time a branch is pushed.
       - name: Publish latest build
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ github.event.before }}
         run: |
+          V='${{ steps.src.outputs.version }}'
+          BUILD='${{ steps.src.outputs.build }}'
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            LOG=$(git log -8 --pretty='- %s')
+          else
+            LOG=$(git log --pretty='- %s' "$BEFORE..${GITHUB_SHA}")
+          fi
+          [ -z "$LOG" ] && LOG='- no new commits'
+
+          cat > /tmp/notes.md <<EOF
+          Install **wlog-$V-b$BUILD-arm64-v8a.apk** unless you know your phone needs another architecture.
+
+          Signed with the project key, so it installs over the previous build and keeps your data.
+
+          ### In this build
+
+          $LOG
+
+          Built from \`main\` at \`${{ steps.src.outputs.sha }}\`.
+          EOF
+
           gh release delete latest --yes --cleanup-tag 2>/dev/null || true
           gh release create latest /tmp/out/*.apk \
-            --title "Latest build ${{ steps.ver.outputs.version }}" \
+            --title "Build $BUILD ($V)" \
             --prerelease \
-            --notes "Built automatically from \`main\`, commit \`${GITHUB_SHA:0:7}\`.
-
-          Install **wlog-${{ steps.ver.outputs.version }}-arm64-v8a.apk** unless you know your phone needs another architecture.
-
-          Signed with the project key, so it installs over a previous version and keeps your data."
+            --notes-file /tmp/notes.md
 
       # A permanent, versioned release when a tag is pushed.
       - name: Publish tagged release
