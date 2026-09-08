@@ -16,8 +16,21 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_launcher_icons: ^0.14.0
 
 flutter:
   uses-material-design: true
   assets:
     - assets/exercises.json
+
+# Launcher icon generation. Build-time only: the source images are not
+# declared under `assets:` above, so they are never bundled into the app.
+# The workflow runs `dart run flutter_launcher_icons` after the Android
+# folder is scaffolded and before the build.
+flutter_launcher_icons:
+  android: "ic_launcher"
+  ios: false
+  image_path: "assets/icon/icon.png"
+  adaptive_icon_background: "#1F3A2E"
+  adaptive_icon_foreground: "assets/icon/icon_foreground.png"
+  min_sdk_android: 21
