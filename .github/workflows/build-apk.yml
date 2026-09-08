@@ -54,18 +54,30 @@ jobs:
         working-directory: /tmp/app
         run: flutter pub get
 
+      # Generates the launcher icons into the scaffolded android/ folder,
+      # including the adaptive-icon layers. Must run after `flutter create`
+      # and before the build.
+      - name: Launcher icon
+        working-directory: /tmp/app
+        run: dart run flutter_launcher_icons
+
       # Runs first so compile errors show up as readable analyzer output
       # instead of a wall of Gradle noise.
       - name: Analyze
         working-directory: /tmp/app
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
+      # One APK per CPU architecture instead of a fat binary carrying all of
+      # them. Roughly halves the download; install the arm64-v8a one.
       - name: Build release APK
         working-directory: /tmp/app
-        run: flutter build apk --release
+        run: flutter build apk --release --split-per-abi
+
+      - name: Sizes
+        run: ls -lh /tmp/app/build/app/outputs/flutter-apk/*.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: workout-log-apk
-          path: /tmp/app/build/app/outputs/flutter-apk/app-release.apk
+          path: /tmp/app/build/app/outputs/flutter-apk/*.apk
           if-no-files-found: error
