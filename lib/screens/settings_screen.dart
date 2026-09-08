@@ -19,6 +19,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _showTimer = false;
   String? _tree;
   String _folderLabel = '';
+  String _version = '';
   bool _busy = false;
 
   @override
@@ -32,12 +33,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final tree = await Db.setting(exportTreeKey);
     final ok = await Saf.hasAccess(tree);
     final label = ok ? await Saf.folderName(tree!) : '';
+    var version = '';
+    try {
+      final v = await Native.appVersion();
+      version = v.code.isEmpty ? v.name : '${v.name} (build ${v.code})';
+    } catch (_) {
+      version = 'unknown';
+    }
     if (!mounted) return;
     setState(() {
       _showTimer = showTimer;
       _tree = ok ? tree : null;
       _folderLabel = label;
+      _version = version;
     });
+  }
+
+  Future<void> _checkForUpdates() async {
+    final opened = await Native.openUrl(releasesUrl);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('No app available to open the link.'),
+      ));
+    }
   }
 
   Future<void> _pickFolder() async {
@@ -235,6 +253,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: const Text('Restore from backup'),
             subtitle: const Text('Replaces the current log'),
             onTap: _restore,
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.info_outline),
+            title: const Text('Installed version'),
+            subtitle: Text(_version.isEmpty ? '…' : _version),
+          ),
+          ListTile(
+            leading: const Icon(Icons.system_update_alt),
+            title: const Text('Check for updates'),
+            subtitle: const Text(
+                'Opens the releases page. Compare the build number above.'),
+            trailing: const Icon(Icons.open_in_new, size: 18),
+            onTap: _checkForUpdates,
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(Bv.s4, Bv.s2, Bv.s4, Bv.s6),

@@ -44,6 +44,8 @@ class MainActivity : FlutterActivity() {
                     folderName(Uri.parse(call.argument<String>("tree")!!))
                 )
                 "hasAccess" -> result.success(hasAccess(call.argument<String>("tree")))
+                "appVersion" -> result.success(appVersion())
+                "openUrl" -> openUrl(call.argument<String>("url")!!, result)
                 else -> result.notImplemented()
             }
         } catch (e: Exception) {
@@ -159,5 +161,37 @@ class MainActivity : FlutterActivity() {
         val id = DocumentsContract.getTreeDocumentId(tree)
         val tail = id.substringAfterLast(':')
         return if (tail.isEmpty()) id else tail
+    }
+
+    // ------------------------------------------------------- version and web
+
+    /** What is actually installed, read from the package rather than assumed. */
+    private fun appVersion(): Map<String, String> {
+        val info = packageManager.getPackageInfo(packageName, 0)
+        val code = if (android.os.Build.VERSION.SDK_INT >= 28) {
+            info.longVersionCode.toString()
+        } else {
+            @Suppress("DEPRECATION")
+            info.versionCode.toString()
+        }
+        return mapOf("name" to (info.versionName ?: ""), "code" to code)
+    }
+
+    /**
+     * Hands a link to whatever handles it, usually the browser.
+     *
+     * The app itself makes no network requests and holds no internet
+     * permission; the browser does the fetching. That keeps the update check
+     * from turning this into a connected app.
+     */
+    private fun openUrl(url: String, result: MethodChannel.Result) {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            startActivity(intent)
+            result.success(true)
+        } catch (e: android.content.ActivityNotFoundException) {
+            result.success(false)
+        }
     }
 }

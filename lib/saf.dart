@@ -63,3 +63,28 @@ class Saf {
 
 /// Settings key holding the chosen export folder's tree URI.
 const exportTreeKey = 'export_tree';
+
+/// Where builds are published. The rolling release always points at the
+/// current build, and its title carries the build number to compare against.
+const releasesUrl = 'https://github.com/ChidanshM/kreedah-wlog/releases/latest';
+
+/// Odds and ends from the same bridge: what is installed, and handing a link
+/// to the browser.
+///
+/// The channel is the app's single connection to the Android side, so it
+/// carries more than storage despite this file's name.
+class Native {
+  static const _channel = MethodChannel('wlog/storage');
+
+  /// Version name and build number of the installed package, read from
+  /// Android rather than from a constant that could drift out of step.
+  static Future<({String name, String code})> appVersion() async {
+    final m = await _channel.invokeMapMethod<String, String>('appVersion');
+    return (name: m?['name'] ?? '', code: m?['code'] ?? '');
+  }
+
+  /// Opens a link in the browser. The app holds no internet permission and
+  /// makes no requests of its own; the browser does the fetching.
+  static Future<bool> openUrl(String url) async =>
+      await _channel.invokeMethod<bool>('openUrl', {'url': url}) ?? false;
+}
