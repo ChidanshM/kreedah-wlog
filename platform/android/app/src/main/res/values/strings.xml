@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        The name shown under the launcher icon.
+
+        Kept here rather than substituted into the manifest by the build, so
+        the name lives in source with no shell escaping between it and the
+        app. The manifest points at this with @string/app_name.
+
+        Macrons are intentional: the platform convention is that display names
+        carry them and identifiers do not. If the d with a dot renders as an
+        empty box on a device whose font lacks Latin Extended Additional,
+        replace the value below with "Kreedah WLog".
+    -->
+    <string name="app_name">Krīḍā WLog</string>
+</resources>
