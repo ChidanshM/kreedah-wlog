@@ -1,0 +1,313 @@
+import 'package:flutter/material.dart';
+
+import '../db.dart';
+import '../util.dart';
+import 'routine_edit_screen.dart';
+import 'workout_screen.dart';
+
+class RoutinesScreen extends StatefulWidget {
+  const RoutinesScreen({super.key});
+
+  @override
+  State<RoutinesScreen> createState() => _RoutinesScreenState();
+}
+
+class _RoutinesScreenState extends State<RoutinesScreen> {
+  List<Map<String, dynamic>> _routines = const [];
+  Map<String, dynamic>? _open;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final routines = await Db.routines();
+    final open = await Db.openWorkout();
+    if (!mounted) return;
+    setState(() {
+      _routines = routines;
+      _open = open;
+      _loading = false;
+    });
+  }
+
+  Future<void> _newRoutine() async {
+    final name = await _promptName(context, 'New routine', '');
+    if (name == null || name.isEmpty) return;
+    final id = await Db.createRoutine(name);
+    if (!mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => RoutineEditScreen(routineId: id, routineName: name),
+    ));
+    await _load();
+  }
+
+  Future<void> _start(Map<String, dynamic> routine) async {
+    if (_open != null) {
+      final resume = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('Session already open'),
+          content: Text(
+              '"${_open!['routine_name']}" is still running. Finish or discard it before starting another.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(c, false),
+                child: const Text('Cancel')),
+            FilledButton(
+                onPressed: () => Navigator.pop(c, true),
+                child: const Text('Open it')),
+          ],
+        ),
+      );
+      if (resume == true) await _resume();
+      return;
+    }
+
+    final exercises = await Db.routineExercises(routine['id'] as int);
+    if (exercises.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Add some exercises to this routine first.')),
+      );
+      return;
+    }
+
+    final id = await Db.startWorkout(
+        routine['id'] as int, routine['name'] as String);
+    if (!mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => WorkoutScreen(workoutId: id),
+    ));
+    await _load();
+  }
+
+  Future<void> _resume() async {
+    final id = _open!['id'] as int;
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => WorkoutScreen(workoutId: id),
+    ));
+    await _load();
+  }
+
+  Future<void> _startEmpty() async {
+    if (_open != null) {
+      await _resume();
+      return;
+    }
+    final id = await Db.startEmptyWorkout('Ad-hoc session');
+    if (!mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => WorkoutScreen(workoutId: id),
+    ));
+    await _load();
+  }
+
+  Future<void> _routineMenu(Map<String, dynamic> r) async {
+    final id = r['id'] as int;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (c) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Edit exercises'),
+              onTap: () => Navigator.pop(c, 'edit'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.drive_file_rename_outline),
+              title: const Text('Rename'),
+              onTap: () => Navigator.pop(c, 'rename'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.copy_outlined),
+              title: const Text('Duplicate'),
+              onTap: () => Navigator.pop(c, 'duplicate'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline),
+              title: const Text('Delete'),
+              onTap: () => Navigator.pop(c, 'delete'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == null || !mounted) return;
+
+    switch (action) {
+      case 'edit':
+        await Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) =>
+              RoutineEditScreen(routineId: id, routineName: r['name'] as String),
+        ));
+        break;
+      case 'rename':
+        final name =
+            await _promptName(context, 'Rename routine', r['name'] as String);
+        if (name != null && name.isNotEmpty) await Db.renameRoutine(id, name);
+        break;
+      case 'duplicate':
+        await Db.duplicateRoutine(id, '${r['name']} copy');
+        break;
+      case 'delete':
+        final ok = await showDialog<bool>(
+          context: context,
+          builder: (c) => AlertDialog(
+            title: Text('Delete "${r['name']}"?'),
+            content: const Text(
+                'Past sessions logged from this routine are kept. Only the plan is removed.'),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(c, false),
+                  child: const Text('Cancel')),
+              FilledButton(
+                  onPressed: () => Navigator.pop(c, true),
+                  child: const Text('Delete')),
+            ],
+          ),
+        );
+        if (ok == true) await Db.deleteRoutine(id);
+        break;
+    }
+    await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Routines'),
+        actions: [
+          IconButton(
+            tooltip: 'Ad-hoc session',
+            icon: const Icon(Icons.bolt_outlined),
+            onPressed: _startEmpty,
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _newRoutine,
+        icon: const Icon(Icons.add),
+        label: const Text('Routine'),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: ListView(
+                padding: const EdgeInsets.only(bottom: 96),
+                children: [
+                  if (_open != null)
+                    Card(
+                      color: theme.colorScheme.primaryContainer,
+                      child: ListTile(
+                        leading: const Icon(Icons.play_circle_outline),
+                        title: Text('${_open!['routine_name']} in progress'),
+                        subtitle: Text(_startedLabel(_open!)),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: _resume,
+                      ),
+                    ),
+                  if (_routines.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(24, 64, 24, 0),
+                      child: Column(
+                        children: [
+                          Icon(Icons.list_alt_outlined, size: 48),
+                          SizedBox(height: 12),
+                          Text(
+                            'No routines yet.\nMake one per training day — there is no limit.',
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ..._routines.map(
+                    (r) => Card(
+                      child: ListTile(
+                        title: Text(r['name'] as String,
+                            style: theme.textTheme.titleMedium),
+                        subtitle: _RoutineSubtitle(routineId: r['id'] as int),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.more_vert),
+                              onPressed: () => _routineMenu(r),
+                            ),
+                            FilledButton(
+                              onPressed: () => _start(r),
+                              child: const Text('Start'),
+                            ),
+                          ],
+                        ),
+                        onTap: () => _routineMenu(r),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+    );
+  }
+
+  String _startedLabel(Map<String, dynamic> w) {
+    final t = parseIso(w['started_at'] as String?);
+    if (t == null) return 'Tap to continue';
+    return 'Started ${hhmm(t)}, tap to continue';
+  }
+}
+
+class _RoutineSubtitle extends StatelessWidget {
+  const _RoutineSubtitle({required this.routineId});
+  final int routineId;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: Db.routineExercises(routineId),
+      builder: (context, snap) {
+        if (!snap.hasData) return const Text(' ');
+        final rows = snap.data!;
+        if (rows.isEmpty) return const Text('Empty — tap to add exercises');
+        final names = rows.take(3).map((e) => e['ex_name'] as String).join(', ');
+        final more = rows.length > 3 ? ' +${rows.length - 3}' : '';
+        return Text('${rows.length} exercises — $names$more',
+            maxLines: 2, overflow: TextOverflow.ellipsis);
+      },
+    );
+  }
+}
+
+Future<String?> _promptName(
+    BuildContext context, String title, String initial) async {
+  final controller = TextEditingController(text: initial);
+  return showDialog<String>(
+    context: context,
+    builder: (c) => AlertDialog(
+      title: Text(title),
+      content: TextField(
+        controller: controller,
+        autofocus: true,
+        textCapitalization: TextCapitalization.words,
+        decoration: const InputDecoration(labelText: 'Name'),
+        onSubmitted: (v) => Navigator.pop(c, v.trim()),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () => Navigator.pop(c, controller.text.trim()),
+          child: const Text('Save'),
+        ),
+      ],
+    ),
+  );
+}
