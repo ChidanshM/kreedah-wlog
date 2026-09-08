@@ -22,6 +22,9 @@ flutter:
   uses-material-design: true
   assets:
     - assets/exercises.json
+    # The user guide is read from the same file that lives in the repository,
+    # so there is one copy of it rather than two that can drift apart.
+    - docs/USER-GUIDE.md
 
 # Launcher icon generation. Build-time only: the source images are not
 # declared under `assets:` above, so they are never bundled into the app.

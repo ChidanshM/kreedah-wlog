@@ -46,7 +46,7 @@ jobs:
           flutter create --org com.chidansh --project-name workout_log --platforms=android /tmp/app
           rm -rf /tmp/app/lib /tmp/app/test
           DIR='${{ steps.src.outputs.dir }}'
-          cp -r "$DIR/lib" "$DIR/assets" "$DIR/pubspec.yaml" /tmp/app/
+          cp -r "$DIR/lib" "$DIR/assets" "$DIR/docs" "$DIR/pubspec.yaml" /tmp/app/
           sed -i 's/android:label="workout_log"/android:label="Workout Log"/' \
             /tmp/app/android/app/src/main/AndroidManifest.xml
 

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../db.dart';
 import '../util.dart';
 import 'routine_edit_screen.dart';
+import 'guide_screen.dart';
 import 'workout_screen.dart';
 
 class RoutinesScreen extends StatefulWidget {
@@ -216,15 +217,26 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
                       ),
                     ),
                   if (_routines.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(24, 64, 24, 0),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 56, 24, 0),
                       child: Column(
                         children: [
-                          Icon(Icons.list_alt_outlined, size: 48),
-                          SizedBox(height: 12),
-                          Text(
+                          const Icon(Icons.list_alt_outlined, size: 48),
+                          const SizedBox(height: 12),
+                          const Text(
                             'No routines yet.\nMake one per training day — there is no limit.',
                             textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 20),
+                          // Surfaced here because this is the moment someone
+                          // has no idea what to do first, and the answer
+                          // (fill in Equipment) is not obvious.
+                          OutlinedButton.icon(
+                            onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                    builder: (_) => const GuideScreen())),
+                            icon: const Icon(Icons.menu_book_outlined),
+                            label: const Text('Read the guide'),
                           ),
                         ],
                       ),

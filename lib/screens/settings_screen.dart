@@ -6,6 +6,7 @@ import '../db.dart';
 import '../export.dart';
 import '../library.dart';
 import 'equipment_screen.dart';
+import 'guide_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -152,6 +153,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
       appBar: AppBar(title: const Text('More')),
       body: ListView(
         children: [
+          ListTile(
+            leading: const Icon(Icons.menu_book_outlined),
+            title: const Text('User guide'),
+            subtitle: const Text('How every feature works, with examples'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const GuideScreen())),
+          ),
+          const Divider(),
           ListTile(
             leading: const Icon(Icons.inventory_2_outlined),
             title: const Text('Equipment'),
