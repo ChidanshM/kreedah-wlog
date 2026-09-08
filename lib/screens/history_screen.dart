@@ -67,9 +67,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
                           subtitle: Text(started == null
                               ? '${num2(vol)} kg'
                               : '${prettyDate(started)}, ${hhmm(started)}'),
-                          trailing: Text('${num2(vol)} kg',
-                              style: BvType.bodySm),
-                          trailing: const Icon(Icons.chevron_right),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text('${num2(vol)} kg', style: BvType.bodySm),
+                              const SizedBox(width: 4),
+                              const Icon(Icons.chevron_right,
+                                  color: Bv.ink600, size: 20),
+                            ],
+                          ),
                           onTap: () async {
                             await Navigator.of(context).push(MaterialPageRoute(
                               builder: (_) => WorkoutDetailScreen(workoutId: id),
