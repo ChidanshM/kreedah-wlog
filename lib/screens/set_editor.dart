@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../db.dart';
 import '../library.dart';
+import '../theme.dart';
 import '../util.dart';
 
 /// Edits one set. For a unilateral exercise, [rows] holds two records
@@ -61,6 +62,57 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
   double? _rpe;
   List<double> _chipWeights = const [];
 
+  /// The rotating counter and the text field are two views of one value.
+  /// `_fromWheel` breaks the feedback loop when one updates the other.
+  late final List<int> _items = _buildItems();
+  late final FixedExtentScrollController _wheel;
+  bool _fromWheel = false;
+
+  List<int> _buildItems() {
+    switch (widget.setType) {
+      case SetType.time:
+        return [for (var s = 5; s <= 300; s += 5) s];
+      case SetType.distance:
+        return [for (var s = 5; s <= 200; s += 5) s];
+      default:
+        return [for (var r = 1; r <= 40; r++) r];
+    }
+  }
+
+  /// Nearest wheel position to whatever is typed. Falls back to a sensible
+  /// starting point when the field is empty.
+  int _indexFor(String text) {
+    var v = int.tryParse(text.trim());
+    v ??= switch (widget.setType) {
+      SetType.time => 30,
+      SetType.distance => 20,
+      _ => 8,
+    };
+    var best = 0, bestD = 1 << 30;
+    for (var i = 0; i < _items.length; i++) {
+      final d = (_items[i] - v).abs();
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  void _syncWheelFromText() {
+    if (_fromWheel || !_wheel.hasClients) return;
+    final ctl = _value[_focusedRow];
+    if (ctl == null) return;
+    final i = _indexFor(ctl.text);
+    if (_wheel.selectedItem != i) _wheel.jumpToItem(i);
+  }
+
+  void _focusRow(int id) {
+    if (_focusedRow == id) return;
+    setState(() => _focusedRow = id);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _syncWheelFromText());
+  }
+
   @override
   void initState() {
     super.initState();
@@ -72,6 +124,11 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
     }
     _rpe = (widget.rows.first['rpe'] as num?)?.toDouble();
     _focusedRow = widget.rows.first['id'] as int;
+    _wheel = FixedExtentScrollController(
+        initialItem: _indexFor(_value[_focusedRow]!.text));
+    for (final c in _value.values) {
+      c.addListener(_syncWheelFromText);
+    }
     _loadChips();
   }
 
@@ -91,10 +148,12 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
 
   @override
   void dispose() {
+    _wheel.dispose();
     for (final c in _weight.values) {
       c.dispose();
     }
     for (final c in _value.values) {
+      c.removeListener(_syncWheelFromText);
       c.dispose();
     }
     super.dispose();
@@ -177,8 +236,8 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
             ...widget.rows.map(_sideBlock),
             if (_chipWeights.isNotEmpty) ...[
               const SizedBox(height: 4),
-              Text('Your weights (${widget.unit})',
-                  style: theme.textTheme.labelMedium),
+              Text('YOUR WEIGHTS (${widget.unit.toUpperCase()})',
+                  style: BvType.label),
               const SizedBox(height: 6),
               Wrap(
                 spacing: 6,
@@ -194,6 +253,8 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
                     .toList(),
               ),
             ],
+            const SizedBox(height: 16),
+            _wheelPicker(),
             const SizedBox(height: 16),
             Row(
               children: [
@@ -244,6 +305,65 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
     );
   }
 
+  /// A rotating counter for the reps field. It and the text field are two
+  /// views of the same number: spinning writes into the field, typing moves
+  /// the wheel. Neither is the primary — spinning is faster for small
+  /// adjustments, typing is better for anything unusual.
+  Widget _wheelPicker() {
+    final label = switch (widget.setType) {
+      SetType.time => 'SECONDS',
+      SetType.distance => 'STEPS',
+      _ => 'REPS',
+    };
+    final side = widget.rows.length > 1
+        ? '  ${widget.rows.firstWhere((r) => r['id'] == _focusedRow, orElse: () => widget.rows.first)['side']}'
+        : '';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('$label$side', style: BvType.label),
+        const SizedBox(height: 4),
+        SizedBox(
+          height: 116,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // band marking the selected row
+              Container(
+                height: 38,
+                decoration: BoxDecoration(
+                  color: Bv.sage200,
+                  borderRadius: BorderRadius.circular(Bv.rMd),
+                ),
+              ),
+              ListWheelScrollView.useDelegate(
+                controller: _wheel,
+                itemExtent: 38,
+                perspective: 0.004,
+                diameterRatio: 1.7,
+                physics: const FixedExtentScrollPhysics(),
+                onSelectedItemChanged: (i) {
+                  HapticFeedback.selectionClick();
+                  _fromWheel = true;
+                  _value[_focusedRow]?.text = '${_items[i]}';
+                  _fromWheel = false;
+                  setState(() {});
+                },
+                childDelegate: ListWheelChildBuilderDelegate(
+                  childCount: _items.length,
+                  builder: (context, i) => Center(
+                    child: Text('${_items[i]}', style: BvType.metric),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _sideBlock(Map<String, dynamic> r) {
     final id = r['id'] as int;
     final side = r['side'] as String;
@@ -276,7 +396,7 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
                     decoration: InputDecoration(
                       labelText: 'Weight (${widget.unit})',
                     ),
-                    onTap: () => setState(() => _focusedRow = id),
+                    onTap: () => _focusRow(id),
                   ),
                 ),
               if (showWeight) const SizedBox(width: 12),
@@ -286,6 +406,7 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
                   keyboardType: TextInputType.number,
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                   decoration: InputDecoration(labelText: _valueLabel),
+                  onTap: () => _focusRow(id),
                 ),
               ),
             ],
