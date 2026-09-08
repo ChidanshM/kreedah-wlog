@@ -76,6 +76,32 @@ jobs:
       - name: Sizes
         run: ls -lh /tmp/app/build/app/outputs/flutter-apk/*.apk
 
+      # Re-signs the APKs with the permanent key so every build shares one
+      # identity and updates install over the top instead of demanding an
+      # uninstall. Runs on the built artefact rather than patching Gradle,
+      # which keeps it independent of Flutter's generated build files.
+      - name: Sign with the permanent key
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "No signing secrets set. See docs/SIGNING-SETUP.md."
+            echo "Builds would stay debug-signed and updates would need an uninstall."
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_B64" | base64 -d > /tmp/wlog.jks
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          APKSIGNER=$(ls "$SDK"/build-tools/*/apksigner | sort -V | tail -1)
+          echo "Using $APKSIGNER"
+          for f in /tmp/app/build/app/outputs/flutter-apk/*-release.apk; do
+            "$APKSIGNER" sign --ks /tmp/wlog.jks --ks-pass env:KS_PASS \
+              --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASS "$f"
+            "$APKSIGNER" verify --print-certs "$f" | grep -i "SHA-256" | head -1
+          done
+
       - uses: actions/upload-artifact@v4
         with:
           name: workout-log-apk
