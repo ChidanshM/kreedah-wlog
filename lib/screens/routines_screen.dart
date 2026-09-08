@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../db.dart';
+import '../export.dart';
+import '../library.dart';
+import '../theme.dart';
 import '../util.dart';
 import 'routine_edit_screen.dart';
 import 'guide_screen.dart';
@@ -137,6 +140,128 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
     await _load();
   }
 
+  /// Write routines out on their own. [preselect] jumps straight to exporting
+  /// one, from that routine's own menu.
+  Future<void> _exportRoutines({int? preselect}) async {
+    List<int> ids;
+    if (preselect != null) {
+      ids = [preselect];
+    } else {
+      final chosen = <int>{};
+      final ok = await showModalBottomSheet<bool>(
+        context: context,
+        isScrollControlled: true,
+        builder: (c) => StatefulBuilder(
+          builder: (c, setSheet) => SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(Bv.s4, Bv.s4, Bv.s4, 0),
+                  child: Text('Which routines?'),
+                ),
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: _routines
+                        .map((r) => CheckboxListTile(
+                              value: chosen.contains(r['id'] as int),
+                              title: Text(r['name'] as String),
+                              onChanged: (v) => setSheet(() => v == true
+                                  ? chosen.add(r['id'] as int)
+                                  : chosen.remove(r['id'] as int)),
+                            ))
+                        .toList(),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(Bv.s3),
+                  child: Row(
+                    children: [
+                      TextButton(
+                        onPressed: () => setSheet(() {
+                          chosen.clear();
+                          chosen.addAll(_routines.map((r) => r['id'] as int));
+                        }),
+                        child: const Text('Select all'),
+                      ),
+                      const Spacer(),
+                      FilledButton(
+                        onPressed: chosen.isEmpty
+                            ? null
+                            : () => Navigator.pop(c, true),
+                        child: Text('Export ${chosen.length}'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      if (ok != true || chosen.isEmpty) return;
+      ids = chosen.toList();
+    }
+
+    try {
+      final r = await Exporter.exportRoutines(ids);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(r.reachable
+            ? '${r.name} written to ${r.where}.'
+            : '${r.name} written to the app folder, which Android hides. '
+                'Set an export folder under More.'),
+      ));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Export failed: $e')));
+      }
+    }
+  }
+
+  Future<void> _importRoutines() async {
+    final files = await Exporter.availableRoutineFiles();
+    if (!mounted) return;
+    if (files.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('No routine files found in the export folder.'),
+      ));
+      return;
+    }
+    final ref = await showModalBottomSheet<String>(
+      context: context,
+      builder: (c) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: files
+              .map((f) => ListTile(
+                    leading: const Icon(Icons.file_open_outlined),
+                    title: Text(f.name),
+                    onTap: () => Navigator.pop(c, f.ref),
+                  ))
+              .toList(),
+        ),
+      ),
+    );
+    if (ref == null) return;
+    try {
+      final n = await Exporter.importRoutinesFrom(ref);
+      await ExerciseLibrary.load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('$n routine${n == 1 ? '' : 's'} added.')));
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Import failed: $e')));
+      }
+    }
+  }
+
   Future<void> _routineMenu(Map<String, dynamic> r) async {
     final id = r['id'] as int;
     final action = await showModalBottomSheet<String>(
@@ -168,6 +293,11 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
               onTap: () => Navigator.pop(c, 'duplicate'),
             ),
             ListTile(
+              leading: const Icon(Icons.ios_share),
+              title: const Text('Export this routine'),
+              onTap: () => Navigator.pop(c, 'export'),
+            ),
+            ListTile(
               leading: const Icon(Icons.delete_outline),
               title: const Text('Delete'),
               onTap: () => Navigator.pop(c, 'delete'),
@@ -181,6 +311,9 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
     switch (action) {
       case 'past':
         await _logPast(r);
+        return;
+      case 'export':
+        await _exportRoutines(preselect: id);
         return;
       case 'edit':
         await Navigator.of(context).push(MaterialPageRoute(
@@ -230,6 +363,21 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
             tooltip: 'Ad-hoc session',
             icon: const Icon(Icons.bolt_outlined),
             onPressed: _startEmpty,
+          ),
+          PopupMenuButton<String>(
+            onSelected: (v) {
+              if (v == 'export') _exportRoutines();
+              if (v == 'import') _importRoutines();
+            },
+            itemBuilder: (c) => [
+              PopupMenuItem(
+                value: 'export',
+                enabled: _routines.isNotEmpty,
+                child: const Text('Export routines'),
+              ),
+              const PopupMenuItem(
+                  value: 'import', child: Text('Import routines')),
+            ],
           ),
         ],
       ),

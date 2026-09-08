@@ -241,6 +241,96 @@ class Db {
     await batch.commit(noResult: true);
   }
 
+  // ------------------------------------------------- routines, in and out
+
+  /// A portable copy of the chosen routines.
+  ///
+  /// Any custom exercise a routine refers to travels with it, otherwise the
+  /// routine would arrive elsewhere pointing at something that does not
+  /// exist there.
+  static Future<Map<String, dynamic>> routinesExport(List<int> ids) async {
+    final routines = <Map<String, dynamic>>[];
+    final customKeys = <String>{};
+
+    for (final id in ids) {
+      final found = await _db.query('routines', where: 'id = ?', whereArgs: [id]);
+      if (found.isEmpty) continue;
+      final exercises = await routineExercises(id);
+      for (final e in exercises) {
+        final k = e['ex_key'] as String;
+        if (k.startsWith('CUSTOM/')) customKeys.add(k);
+      }
+      routines.add({
+        'name': found.first['name'],
+        'exercises': exercises
+            .map((e) => {
+                  'ex_key': e['ex_key'],
+                  'ex_name': e['ex_name'],
+                  'position': e['position'],
+                  'set_type': e['set_type'],
+                  'unilateral': e['unilateral'],
+                  'unit': e['unit'],
+                  'target_sets': e['target_sets'],
+                })
+            .toList(),
+      });
+    }
+
+    final customs = <Map<String, dynamic>>[];
+    for (final k in customKeys) {
+      final r = await _db.query('custom_exercises', where: 'k = ?', whereArgs: [k]);
+      if (r.isNotEmpty) customs.add(Map<String, dynamic>.from(r.first));
+    }
+
+    return {
+      'format': 'workout_log_routines',
+      'version': 1,
+      'exported_at': isoLocal(DateTime.now()),
+      'routines': routines,
+      'custom_exercises': customs,
+    };
+  }
+
+  /// Adds routines from an export. Never overwrites: a clashing name gains a
+  /// suffix, so importing can lose nothing that is already here.
+  static Future<int> importRoutines(Map<String, dynamic> data) async {
+    for (final row in (data['custom_exercises'] as List? ?? const [])) {
+      await _db.insert('custom_exercises', Map<String, dynamic>.from(row as Map),
+          conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+
+    var added = 0;
+    for (final entry in (data['routines'] as List? ?? const [])) {
+      final m = Map<String, dynamic>.from(entry as Map);
+      var name = (m['name'] as String?)?.trim();
+      if (name == null || name.isEmpty) continue;
+
+      final clash = await _db.query('routines', where: 'name = ?', whereArgs: [name]);
+      if (clash.isNotEmpty) name = '$name (imported)';
+
+      final newId = await createRoutine(name);
+      final exercises = (m['exercises'] as List? ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList()
+        ..sort((a, b) =>
+            ((a['position'] as num?) ?? 0).compareTo((b['position'] as num?) ?? 0));
+
+      for (final ex in exercises) {
+        await addRoutineExercise(
+          newId,
+          exKey: ex['ex_key'] as String,
+          exName: ex['ex_name'] as String,
+          setType: (ex['set_type'] as String?) ?? SetType.reps,
+          unilateral: ((ex['unilateral'] as num?) ?? 0) == 1,
+          unit: (ex['unit'] as String?) ?? 'kg',
+          targetSets: ((ex['target_sets'] as num?) ?? 3).toInt(),
+        );
+      }
+      added++;
+    }
+    return added;
+  }
+
   // ---------------------------------------------------------------- workouts
 
   /// A session that was started but never finished, if any.

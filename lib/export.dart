@@ -177,6 +177,71 @@ class Exporter {
 
   /// Backups available to restore from, newest first.
   static Future<List<({String name, String ref})>> availableBackups() async {
+    final all = await _jsonFiles();
+    return all.where((f) => f.name.startsWith('backup')).toList();
+  }
+
+  /// [ref] is either a document URI from the chosen folder or a file path.
+  static Future<void> restoreFrom(String ref) async {
+    final raw = ref.startsWith('content://')
+        ? await Saf.readFile(ref)
+        : await File(ref).readAsString();
+    final data = jsonDecode(raw) as Map<String, dynamic>;
+    if (data['format'] != 'workout_log_backup') {
+      throw const FormatException('Not a workout log backup file.');
+    }
+    await Db.restore(data);
+  }
+
+  // ---------------------------------------------------------------- routines
+
+  static const _routinePrefix = 'wlog-routines';
+
+  /// Writes the chosen routines out on their own, separate from a full
+  /// backup, so a single routine can be moved or shared without carrying
+  /// every session with it.
+  static Future<({String name, String where, bool reachable})> exportRoutines(
+      List<int> ids) async {
+    final now = DateTime.now();
+    final stamp =
+        '${ymd(now)}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}';
+    final name = '${_routinePrefix}_$stamp.json';
+    final body = const JsonEncoder.withIndent('  ')
+        .convert(await Db.routinesExport(ids));
+
+    final tree = await Db.setting(exportTreeKey);
+    if (await Saf.hasAccess(tree)) {
+      await Saf.writeFile(
+          tree: tree!, name: name, mime: 'application/json', content: body);
+      return (name: name, where: await Saf.folderName(tree), reachable: true);
+    }
+
+    final dir = await exportDir();
+    await File('${dir.path}/$name').writeAsString(body);
+    return (name: name, where: dir.path, reachable: false);
+  }
+
+  /// Routine files available to import, newest first. Kept apart from full
+  /// backups by their name, so the two lists never mix.
+  static Future<List<({String name, String ref})>> availableRoutineFiles() async {
+    final all = await _jsonFiles();
+    return all.where((f) => f.name.startsWith(_routinePrefix)).toList();
+  }
+
+  static Future<int> importRoutinesFrom(String ref) async {
+    final raw = ref.startsWith('content://')
+        ? await Saf.readFile(ref)
+        : await File(ref).readAsString();
+    final data = jsonDecode(raw) as Map<String, dynamic>;
+    if (data['format'] != 'workout_log_routines') {
+      throw const FormatException(
+          'Not a routine file. A full backup is restored from Restore instead.');
+    }
+    return Db.importRoutines(data);
+  }
+
+  /// Every .json in whichever location is in use.
+  static Future<List<({String name, String ref})>> _jsonFiles() async {
     final tree = await Db.setting(exportTreeKey);
     if (await Saf.hasAccess(tree)) {
       final files = await Saf.listFiles(tree!, suffix: '.json');
@@ -193,17 +258,5 @@ class Exporter {
     return files
         .map((f) => (name: f.path.split('/').last, ref: f.path))
         .toList(growable: false);
-  }
-
-  /// [ref] is either a document URI from the chosen folder or a file path.
-  static Future<void> restoreFrom(String ref) async {
-    final raw = ref.startsWith('content://')
-        ? await Saf.readFile(ref)
-        : await File(ref).readAsString();
-    final data = jsonDecode(raw) as Map<String, dynamic>;
-    if (data['format'] != 'workout_log_backup') {
-      throw const FormatException('Not a workout log backup file.');
-    }
-    await Db.restore(data);
   }
 }
