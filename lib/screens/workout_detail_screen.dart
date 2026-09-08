@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../app_events.dart';
 import '../db.dart';
 import '../util.dart';
+import 'workout_screen.dart';
 
 class WorkoutDetailScreen extends StatefulWidget {
   const WorkoutDetailScreen({super.key, required this.workoutId});
@@ -79,6 +80,15 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
         title: Text(_workout?['routine_name'] as String? ?? 'Session'),
         actions: [
           IconButton(
+            tooltip: 'Edit this session',
+            icon: const Icon(Icons.edit_outlined),
+            onPressed: () async {
+              await Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => WorkoutScreen(workoutId: widget.workoutId)));
+              await _load();
+            },
+          ),
+          IconButton(
               onPressed: _delete, icon: const Icon(Icons.delete_outline)),
         ],
       ),
@@ -94,8 +104,10 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
                       children: [
                         if (started != null)
                           Text(
-                            '${weekdayName(started)} ${prettyDate(started)}, started ${hhmm(started)}'
-                            '${ended == null ? '' : ', finished ${hhmm(ended)}'}',
+                            (_workout?['time_known'] as int? ?? 1) == 0
+                                ? '${weekdayName(started)} ${prettyDate(started)}, time not recorded'
+                                : '${weekdayName(started)} ${prettyDate(started)}, started ${hhmm(started)}'
+                                    '${ended == null ? '' : ', finished ${hhmm(ended)}'}',
                             style: theme.textTheme.bodyMedium,
                           ),
                         const SizedBox(height: 12),

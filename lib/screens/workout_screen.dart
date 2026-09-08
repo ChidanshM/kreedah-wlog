@@ -7,6 +7,7 @@ import '../db.dart';
 import '../theme.dart';
 import '../util.dart';
 import 'exercise_picker.dart';
+import 'session_time_sheet.dart';
 import 'set_editor.dart';
 
 class _ExerciseVM {
@@ -46,6 +47,11 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   Timer? _ticker;
   Duration _elapsed = Duration.zero;
 
+  /// A session that already has an end time is being edited rather than run:
+  /// no live timer, no restamping when it happened, and Finish becomes Save.
+  bool get _editing => _workout?['ended_at'] != null;
+  bool get _timeKnown => (_workout?['time_known'] as int? ?? 1) == 1;
+
   @override
   void initState() {
     super.initState();
@@ -76,6 +82,11 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
         r['ex_key'] as String,
         workout?['routine_id'] as int?,
         widget.workoutId,
+        // An edited past session fills from what came before it, not from
+        // sessions that happened afterwards.
+        before: workout?['ended_at'] == null
+            ? null
+            : workout?['started_at'] as String?,
       );
       vms.add(_ExerciseVM(
         row: Map<String, dynamic>.from(r),
@@ -100,7 +111,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
 
   void _setupTimer() {
     _ticker?.cancel();
-    if (!_showTimer) return;
+    if (!_showTimer || _editing) return;
     final started = parseIso(_workout?['started_at'] as String?);
     if (started == null) return;
     void tick() {
@@ -314,6 +325,26 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     await _load();
   }
 
+  Future<void> _editTimes() async {
+    final started = parseIso(_workout?['started_at'] as String?) ?? DateTime.now();
+    final ended = parseIso(_workout?['ended_at'] as String?);
+    final picked = await pickSessionTime(
+      context,
+      date: started,
+      start: _timeKnown ? TimeOfDay.fromDateTime(started) : null,
+      end: _timeKnown && ended != null ? TimeOfDay.fromDateTime(ended) : null,
+      title: 'When was this session?',
+    );
+    if (picked == null) return;
+    final r = resolveSessionTime(picked);
+    await Db.setWorkoutTimes(widget.workoutId,
+        start: r.start,
+        end: r.end ?? (_editing ? r.start : null),
+        timeKnown: r.timeKnown);
+    notifyDataChanged();
+    await _load();
+  }
+
   Future<void> _finish() async {
     final summary = await Db.workoutSummary(widget.workoutId);
     if (!mounted) return;
@@ -363,6 +394,12 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     if (mounted) Navigator.pop(context);
   }
 
+  Future<void> _saveEdits() async {
+    await Db.saveEdits(widget.workoutId);
+    notifyDataChanged();
+    if (mounted) Navigator.pop(context);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -375,13 +412,16 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
           children: [
             Text(_workout?['routine_name'] as String? ?? 'Session',
                 style: theme.textTheme.titleMedium),
-            Text(
-              started == null
-                  ? 'Session in progress'
-                  : _showTimer
-                      ? 'Started ${hhmm(started)}, running ${mmss(_elapsed.inSeconds)}'
-                      : 'Started ${hhmm(started)}',
-              style: BvType.bodySm,
+            InkWell(
+              onTap: _editTimes,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(_whenLabel(started), style: BvType.bodySm),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.edit_outlined, size: 13, color: Bv.ink600),
+                ],
+              ),
             ),
           ],
         ),
@@ -390,18 +430,22 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
             onSelected: (v) {
               if (v == 'discard') _discard();
               if (v == 'note') _sessionNote();
+              if (v == 'when') _editTimes();
             },
-            itemBuilder: (c) => const [
-              PopupMenuItem(value: 'note', child: Text('Session note')),
-              PopupMenuItem(value: 'discard', child: Text('Discard session')),
+            itemBuilder: (c) => [
+              const PopupMenuItem(value: 'note', child: Text('Session note')),
+              const PopupMenuItem(value: 'when', child: Text('Change date and time')),
+              PopupMenuItem(
+                  value: 'discard',
+                  child: Text(_editing ? 'Delete session' : 'Discard session')),
             ],
           ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _finish,
-        icon: const Icon(Icons.check),
-        label: const Text('Finish'),
+        onPressed: _editing ? _saveEdits : _finish,
+        icon: Icon(_editing ? Icons.done : Icons.check),
+        label: Text(_editing ? 'Save' : 'Finish'),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -437,6 +481,18 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
               itemBuilder: (context, i) => _exerciseCard(_exercises[i], i),
             ),
     );
+  }
+
+  String _whenLabel(DateTime? started) {
+    if (started == null) return 'Session in progress';
+    if (_editing) {
+      return _timeKnown
+          ? '${prettyDate(started)}, ${hhmm(started)}'
+          : '${prettyDate(started)}, time not recorded';
+    }
+    return _showTimer
+        ? 'Started ${hhmm(started)}, running ${mmss(_elapsed.inSeconds)}'
+        : 'Started ${hhmm(started)}';
   }
 
   Future<void> _sessionNote() async {

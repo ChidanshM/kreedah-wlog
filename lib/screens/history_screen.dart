@@ -4,7 +4,9 @@ import '../app_events.dart';
 import '../db.dart';
 import '../theme.dart';
 import '../util.dart';
+import 'session_time_sheet.dart';
 import 'workout_detail_screen.dart';
+import 'workout_screen.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -52,11 +54,74 @@ class _HistoryScreenState extends State<HistoryScreen> {
     });
   }
 
+  /// Add a session that already happened, starting from the routine list.
+  Future<void> _addPast() async {
+    final routines = await Db.routines();
+    if (!mounted) return;
+    if (routines.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Make a routine first.')),
+      );
+      return;
+    }
+
+    final routine = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      builder: (c) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(Bv.s4, Bv.s4, Bv.s4, Bv.s2),
+              child: Text('Which routine did you do?'),
+            ),
+            ...routines.map((r) => ListTile(
+                  leading: const Icon(Icons.fitness_center_outlined),
+                  title: Text(r['name'] as String),
+                  onTap: () => Navigator.pop(c, r),
+                )),
+          ],
+        ),
+      ),
+    );
+    if (routine == null || !mounted) return;
+
+    final exercises = await Db.routineExercises(routine['id'] as int);
+    if (!mounted) return;
+    if (exercises.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('That routine has no exercises yet.')),
+      );
+      return;
+    }
+
+    final picked = await pickSessionTime(context, title: 'When did you train?');
+    if (picked == null || !mounted) return;
+    final t = resolveSessionTime(picked);
+
+    final id = await Db.startWorkout(
+      routine['id'] as int,
+      routine['name'] as String,
+      at: t.start,
+      endedAt: t.end,
+      timeKnown: t.timeKnown,
+    );
+    if (!mounted) return;
+    await Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => WorkoutScreen(workoutId: id)));
+    await _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('History')),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _addPast,
+        icon: const Icon(Icons.add),
+        label: const Text('Past session'),
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _workouts.isEmpty

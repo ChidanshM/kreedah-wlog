@@ -4,6 +4,7 @@ import '../db.dart';
 import '../util.dart';
 import 'routine_edit_screen.dart';
 import 'guide_screen.dart';
+import 'session_time_sheet.dart';
 import 'workout_screen.dart';
 
 class RoutinesScreen extends StatefulWidget {
@@ -107,6 +108,35 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
     await _load();
   }
 
+  /// Enter a session that already happened. Reuses the logging screen in edit
+  /// mode, pre-filled from what came before that date.
+  Future<void> _logPast(Map<String, dynamic> routine) async {
+    final exercises = await Db.routineExercises(routine['id'] as int);
+    if (exercises.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Add some exercises to this routine first.')),
+      );
+      return;
+    }
+    if (!mounted) return;
+    final picked = await pickSessionTime(context, title: 'When did you train?');
+    if (picked == null || !mounted) return;
+    final t = resolveSessionTime(picked);
+
+    final id = await Db.startWorkout(
+      routine['id'] as int,
+      routine['name'] as String,
+      at: t.start,
+      endedAt: t.end,
+      timeKnown: t.timeKnown,
+    );
+    if (!mounted) return;
+    await Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => WorkoutScreen(workoutId: id)));
+    await _load();
+  }
+
   Future<void> _routineMenu(Map<String, dynamic> r) async {
     final id = r['id'] as int;
     final action = await showModalBottomSheet<String>(
@@ -115,6 +145,13 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            ListTile(
+              leading: const Icon(Icons.history_toggle_off),
+              title: const Text('Log a past session'),
+              subtitle: const Text('For a workout you did but did not record'),
+              onTap: () => Navigator.pop(c, 'past'),
+            ),
+            const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.edit_outlined),
               title: const Text('Edit exercises'),
@@ -142,6 +179,9 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
     if (action == null || !mounted) return;
 
     switch (action) {
+      case 'past':
+        await _logPast(r);
+        return;
       case 'edit':
         await Navigator.of(context).push(MaterialPageRoute(
           builder: (_) =>

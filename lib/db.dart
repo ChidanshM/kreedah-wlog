@@ -13,9 +13,18 @@ class Db {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'workout_log.db'),
-      version: 1,
+      version: 2,
       onConfigure: (d) async {
         await d.execute('PRAGMA foreign_keys = ON');
+      },
+      onUpgrade: (d, from, to) async {
+        // v2: sessions can be entered after the fact, and the time of day is
+        // often not remembered. time_known distinguishes "trained at 00:00"
+        // from "trained that day, time not recorded".
+        if (from < 2) {
+          await d.execute(
+              'ALTER TABLE workouts ADD COLUMN time_known INTEGER NOT NULL DEFAULT 1');
+        }
       },
       onCreate: (d, v) async {
         await d.execute('''
@@ -46,6 +55,7 @@ class Db {
             routine_name TEXT NOT NULL,
             started_at TEXT NOT NULL,
             ended_at TEXT,
+            time_known INTEGER NOT NULL DEFAULT 1,
             notes TEXT NOT NULL DEFAULT ''
           )''');
 
@@ -253,11 +263,27 @@ class Db {
 
   /// Start a session from a routine: copies the exercise list, then
   /// pre-fills every set from the last time this routine was trained.
-  static Future<int> startWorkout(int routineId, String routineName) async {
+  ///
+  /// [at] backdates the session. When backdating, the pre-filled numbers come
+  /// from sessions *before* that date, otherwise entering an old workout would
+  /// show you numbers from its future, and the sets arrive already confirmed
+  /// because filling in last Tuesday is transcription rather than logging.
+  static Future<int> startWorkout(
+    int routineId,
+    String routineName, {
+    DateTime? at,
+    bool timeKnown = true,
+    DateTime? endedAt,
+  }) async {
+    final backdated = at != null;
+    final start = at ?? DateTime.now();
+
     final workoutId = await _db.insert('workouts', {
       'routine_id': routineId,
       'routine_name': routineName,
-      'started_at': isoLocal(DateTime.now()),
+      'started_at': isoLocal(start),
+      'ended_at': backdated ? isoLocal(endedAt ?? start) : null,
+      'time_known': timeKnown ? 1 : 0,
       'notes': '',
     });
 
@@ -278,6 +304,7 @@ class Db {
         re['ex_key'] as String,
         routineId,
         workoutId,
+        before: backdated ? isoLocal(start) : null,
       );
       await _seedSets(
         weId: weId,
@@ -286,9 +313,42 @@ class Db {
         unit: re['unit'] as String,
         targetSets: re['target_sets'] as int,
         previous: last?['sets'] as List<Map<String, dynamic>>?,
+        confirmFilled: backdated,
+        stamp: backdated ? isoLocal(start) : null,
       );
     }
     return workoutId;
+  }
+
+  /// Change when a session happened. [timeKnown] false means only the date
+  /// was recorded.
+  static Future<void> setWorkoutTimes(
+    int id, {
+    required DateTime start,
+    DateTime? end,
+    required bool timeKnown,
+  }) =>
+      _db.update(
+        'workouts',
+        {
+          'started_at': isoLocal(start),
+          'ended_at': end == null ? null : isoLocal(end),
+          'time_known': timeKnown ? 1 : 0,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+
+  /// Tidy a session that is already finished, without restamping when it
+  /// happened. Used when editing a past session rather than ending a live one.
+  static Future<void> saveEdits(int id) async {
+    await _db.rawDelete('''
+      DELETE FROM sets WHERE done = 0 AND we_id IN
+        (SELECT id FROM workout_exercises WHERE workout_id = ?)''', [id]);
+    await _db.rawDelete('''
+      DELETE FROM workout_exercises
+      WHERE workout_id = ?
+        AND id NOT IN (SELECT DISTINCT we_id FROM sets)''', [id]);
   }
 
   /// An ad-hoc session with no routine behind it.
@@ -422,6 +482,8 @@ class Db {
     required String unit,
     required int targetSets,
     List<Map<String, dynamic>>? previous,
+    bool confirmFilled = false,
+    String? stamp,
   }) async {
     // Group the previous performance by set number.
     final prevBySet = <int, List<Map<String, dynamic>>>{};
@@ -447,6 +509,16 @@ class Db {
           );
         }
         final kg = (src?['weight_kg'] as num?)?.toDouble();
+        // Backdated sessions arrive already confirmed where there is
+        // something to confirm, since filling one in is transcription.
+        final filled = kg != null ||
+            src?['reps'] != null ||
+            src?['duration_sec'] != null ||
+            src?['distance_steps'] != null;
+        final done = confirmFilled && filled;
+        final vol = (setType == SetType.reps && kg != null && src?['reps'] != null)
+            ? kg * (src!['reps'] as int)
+            : 0.0;
         batch.insert('sets', {
           'we_id': weId,
           'set_number': i,
@@ -458,9 +530,9 @@ class Db {
           'duration_sec': src?['duration_sec'],
           'distance_steps': src?['distance_steps'],
           'rpe': src?['rpe'],
-          'volume_kg': 0,
-          'done': 0,
-          'ts': null,
+          'volume_kg': done ? double.parse(vol.toStringAsFixed(2)) : 0,
+          'done': done ? 1 : 0,
+          'ts': done ? stamp : null,
         });
       }
     }
@@ -585,32 +657,42 @@ class Db {
   /// because the same lift in different weekly slots sits in a different
   /// fatigue context. Falls back to the last time you did it anywhere.
   /// Returns null when there is no history at all.
+  ///
+  /// [before] restricts the search to sessions earlier than that timestamp,
+  /// used when entering a session after the fact so it is filled from what
+  /// preceded it rather than from its own future.
   static Future<Map<String, dynamic>?> lastPerformance(
-      String exKey, int? routineId, int excludeWorkoutId) async {
+      String exKey, int? routineId, int excludeWorkoutId,
+      {String? before}) async {
     Map<String, dynamic>? found;
     var scope = 'routine';
+    final cut = before == null ? '' : ' AND w.started_at < ?';
 
     if (routineId != null) {
+      final args = <Object?>[exKey, routineId, excludeWorkoutId];
+      if (before != null) args.add(before);
       final r = await _db.rawQuery('''
         SELECT w.id AS wid, w.started_at AS started_at
         FROM workouts w
         JOIN workout_exercises we ON we.workout_id = w.id
         JOIN sets s ON s.we_id = we.id
         WHERE we.ex_key = ? AND w.routine_id = ? AND w.id <> ?
-          AND w.ended_at IS NOT NULL AND s.done = 1
-        ORDER BY w.started_at DESC LIMIT 1''', [exKey, routineId, excludeWorkoutId]);
+          AND w.ended_at IS NOT NULL AND s.done = 1$cut
+        ORDER BY w.started_at DESC LIMIT 1''', args);
       if (r.isNotEmpty) found = r.first;
     }
 
     if (found == null) {
+      final args = <Object?>[exKey, excludeWorkoutId];
+      if (before != null) args.add(before);
       final r = await _db.rawQuery('''
         SELECT w.id AS wid, w.started_at AS started_at
         FROM workouts w
         JOIN workout_exercises we ON we.workout_id = w.id
         JOIN sets s ON s.we_id = we.id
         WHERE we.ex_key = ? AND w.id <> ?
-          AND w.ended_at IS NOT NULL AND s.done = 1
-        ORDER BY w.started_at DESC LIMIT 1''', [exKey, excludeWorkoutId]);
+          AND w.ended_at IS NOT NULL AND s.done = 1$cut
+        ORDER BY w.started_at DESC LIMIT 1''', args);
       if (r.isEmpty) return null;
       found = r.first;
       scope = 'any';
