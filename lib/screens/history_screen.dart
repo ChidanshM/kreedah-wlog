@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../app_events.dart';
 import '../db.dart';
 import '../theme.dart';
 import '../util.dart';
@@ -20,6 +21,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
   @override
   void initState() {
     super.initState();
+    // The tab is kept alive by the IndexedStack, so a finished session has to
+    // announce itself rather than waiting for a rebuild that never comes.
+    dataRevision.addListener(_onDataChanged);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    dataRevision.removeListener(_onDataChanged);
+    super.dispose();
+  }
+
+  void _onDataChanged() {
     _load();
   }
 

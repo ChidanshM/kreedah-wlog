@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../app_events.dart';
 import '../db.dart';
 import '../theme.dart';
 import '../util.dart';
@@ -336,6 +337,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     );
     if (ok != true) return;
     await Db.finishWorkout(widget.workoutId);
+    notifyDataChanged();
     if (mounted) Navigator.pop(context);
   }
 
@@ -357,6 +359,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     );
     if (ok != true) return;
     await Db.discardWorkout(widget.workoutId);
+    notifyDataChanged();
     if (mounted) Navigator.pop(context);
   }
 

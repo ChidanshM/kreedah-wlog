@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../app_events.dart';
 import '../db.dart';
 import '../util.dart';
 
@@ -62,6 +63,7 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
     );
     if (ok != true) return;
     await Db.discardWorkout(widget.workoutId);
+    notifyDataChanged();
     if (mounted) Navigator.pop(context);
   }
 
