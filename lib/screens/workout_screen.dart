@@ -169,13 +169,71 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     if (saved == true) await _load();
   }
 
+  /// True once any set of this exercise has been confirmed.
+  bool _started(_ExerciseVM vm) => vm.setsBySetNumber.values
+      .any((rows) => rows.any((r) => (r['done'] as int) == 1));
+
+  Future<void> _move(_ExerciseVM vm, int delta) async {
+    final ids = _exercises.map((e) => e.id).toList();
+    final i = ids.indexOf(vm.id);
+    final j = i + delta;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    ids[i] = ids[j];
+    ids[j] = vm.id;
+    await Db.reorderWorkoutExercises(ids);
+    await _load();
+  }
+
+  /// Jump an exercise to the front of the queue, landing it just after the
+  /// last thing already underway rather than above work in progress.
+  Future<void> _doNext(_ExerciseVM vm) async {
+    final ids = _exercises.map((e) => e.id).toList()..remove(vm.id);
+    var insertAt = 0;
+    for (final e in _exercises) {
+      if (e.id != vm.id && _started(e)) {
+        insertAt = ids.indexOf(e.id) + 1;
+      }
+    }
+    ids.insert(insertAt, vm.id);
+    await Db.reorderWorkoutExercises(ids);
+    await _load();
+  }
+
   Future<void> _exerciseMenu(_ExerciseVM vm) async {
+    final idx = _exercises.indexWhere((e) => e.id == vm.id);
     final action = await showModalBottomSheet<String>(
       context: context,
       builder: (c) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            ListTile(
+              leading: const Icon(Icons.low_priority),
+              title: const Text('Do this next'),
+              subtitle: const Text('For when the equipment you wanted is busy'),
+              onTap: () => Navigator.pop(c, 'next'),
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: ListTile(
+                    leading: const Icon(Icons.arrow_upward),
+                    title: const Text('Move up'),
+                    enabled: idx > 0,
+                    onTap: () => Navigator.pop(c, 'up'),
+                  ),
+                ),
+                Expanded(
+                  child: ListTile(
+                    leading: const Icon(Icons.arrow_downward),
+                    title: const Text('Move down'),
+                    enabled: idx >= 0 && idx < _exercises.length - 1,
+                    onTap: () => Navigator.pop(c, 'down'),
+                  ),
+                ),
+              ],
+            ),
+            const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.swap_horiz),
               title: Text('Switch to ${vm.unit == 'kg' ? 'lb' : 'kg'}'),
@@ -206,6 +264,15 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     if (action == null || !mounted) return;
 
     switch (action) {
+      case 'next':
+        await _doNext(vm);
+        return;
+      case 'up':
+        await _move(vm, -1);
+        return;
+      case 'down':
+        await _move(vm, 1);
+        return;
       case 'unit':
         await Db.switchUnit(vm.id, vm.unit == 'kg' ? 'lb' : 'kg');
         break;

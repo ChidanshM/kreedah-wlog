@@ -321,11 +321,24 @@ class Db {
 
   // ------------------------------------------------------- workout exercises
 
-  static Future<List<Map<String, dynamic>>> workoutExercises(int workoutId) =>
-      _db.query('workout_exercises',
-          where: 'workout_id = ?',
-          whereArgs: [workoutId],
-          orderBy: 'position ASC, id ASC');
+  static Future<List<Map<String, dynamic>>> workoutExercises(int workoutId) async =>
+      (await _db.query('workout_exercises',
+              where: 'workout_id = ?',
+              whereArgs: [workoutId],
+              orderBy: 'position ASC, id ASC'))
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+
+  /// Rewrite the running order of a session. Used when equipment is occupied
+  /// and the plan has to bend around what is actually free.
+  static Future<void> reorderWorkoutExercises(List<int> idsInOrder) async {
+    final batch = _db.batch();
+    for (var i = 0; i < idsInOrder.length; i++) {
+      batch.update('workout_exercises', {'position': i},
+          where: 'id = ?', whereArgs: [idsInOrder[i]]);
+    }
+    await batch.commit(noResult: true);
+  }
 
   static Future<int> addWorkoutExercise(
     int workoutId, {
