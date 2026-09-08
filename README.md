@@ -12,20 +12,20 @@ This is the first Krīḍā sub-app that ships as a mobile binary rather than a 
 
 ## Getting the APK
 
-### Option A — GitHub Actions (no local toolchain)
+### Download a build
 
-1. Push to `main`. The **Build APK** workflow runs automatically.
-2. Open the run from the **Actions** tab and download the `workout-log-apk` artifact from the run summary. Downloading artifacts requires being signed into GitHub, even on a public repo.
-3. The artifact is a zip containing one APK per CPU architecture. Install `app-arm64-v8a-release.apk` unless you know you need otherwise.
+**[Latest build](../../releases/latest)** — always the newest commit on `main`. Take `wlog-<version>-arm64-v8a.apk` unless you know your phone needs another architecture, then open it and allow installation from an unknown source when prompted.
 
-The APK is signed with a debug key, which is fine for sideloading onto your own device and unsuitable for distribution. Consecutive builds are not guaranteed to share a key, so **export your data before updating** — a signature mismatch forces an uninstall, which deletes the database.
+That link works from a phone and needs no GitHub account. Tagged releases under [Releases](../../releases) are permanent; the `latest` one is replaced on every build.
 
-### Option B — local build
+Builds are signed with a fixed project key, so a new one installs over the previous version and keeps your data. If an install is ever refused, the key has changed — see [`docs/SIGNING-SETUP.md`](./docs/SIGNING-SETUP.md). The same files are attached to each workflow run as an artifact, but those need a login and expire after 90 days, so the release is the better link.
+
+### Local build
 
 ```bash
 flutter create --org com.chidansh --project-name workout_log --platforms=android /tmp/app
 rm -rf /tmp/app/lib /tmp/app/test
-cp -r lib assets pubspec.yaml /tmp/app/
+cp -r lib assets docs pubspec.yaml /tmp/app/
 cd /tmp/app
 flutter pub get
 flutter build apk --release --split-per-abi

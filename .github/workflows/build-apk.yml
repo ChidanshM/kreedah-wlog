@@ -3,7 +3,12 @@ name: Build APK
 on:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
+
+# Needed to publish releases.
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -102,8 +107,50 @@ jobs:
             "$APKSIGNER" verify --print-certs "$f" | grep -i "SHA-256" | head -1
           done
 
+      # Give the files a name that says what they are, using the version from
+      # pubspec.yaml. app-arm64-v8a-release.apk tells a stranger nothing.
+      - name: Name the builds
+        id: ver
+        run: |
+          DIR='${{ steps.src.outputs.dir }}'
+          V=$(grep -m1 '^version:' "$DIR/pubspec.yaml" | sed 's/version: *//' | cut -d'+' -f1)
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          mkdir -p /tmp/out
+          for f in /tmp/app/build/app/outputs/flutter-apk/*-release.apk; do
+            abi=$(basename "$f" | sed 's/^app-//; s/-release\.apk$//')
+            cp "$f" "/tmp/out/wlog-$V-$abi.apk"
+          done
+          ls -lh /tmp/out
+
+      # A rolling release on a fixed tag, so there is one permanent link that
+      # always points at the current build and can be opened on the phone
+      # without signing in. Actions artifacts need a login and expire.
+      - name: Publish latest build
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest /tmp/out/*.apk \
+            --title "Latest build ${{ steps.ver.outputs.version }}" \
+            --prerelease \
+            --notes "Built automatically from \`main\`, commit \`${GITHUB_SHA:0:7}\`.
+
+          Install **wlog-${{ steps.ver.outputs.version }}-arm64-v8a.apk** unless you know your phone needs another architecture.
+
+          Signed with the project key, so it installs over a previous version and keeps your data."
+
+      # A permanent, versioned release when a tag is pushed.
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" /tmp/out/*.apk \
+            --title "$GITHUB_REF_NAME" --generate-notes
+
       - uses: actions/upload-artifact@v4
         with:
           name: workout-log-apk
-          path: /tmp/app/build/app/outputs/flutter-apk/*.apk
+          path: /tmp/out/*.apk
           if-no-files-found: error
