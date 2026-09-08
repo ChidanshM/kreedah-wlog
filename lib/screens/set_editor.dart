@@ -106,13 +106,19 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
     final ex = ExerciseLibrary.get(widget.exKey);
     final relevant = ex == null ? <String>[] : EquipKind.kindsFor(ex.equipment);
     final all = await Db.equipment();
-    var pool = all.where((e) => relevant.contains(e['kind'])).toList();
-    if (pool.isEmpty) pool = all;
+    // Only fall back to every weight when the exercise names no equipment we
+    // recognise. A cable machine must never offer dumbbell weights.
+    final pool = relevant.isEmpty
+        ? all
+        : all.where((e) => relevant.contains(e['kind'])).toList();
 
     final values = <double>{};
     for (final e in pool) {
-      final kg = toKg((e['weight'] as num).toDouble(), e['unit'] as String);
-      values.add(fromKg(kg, widget.unit));
+      values.add(convertWeight(
+        (e['weight'] as num).toDouble(),
+        e['unit'] as String,
+        widget.unit,
+      ));
     }
     final list = values.toList()..sort();
     if (!mounted) return;

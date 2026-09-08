@@ -164,6 +164,26 @@ class BvType {
     fontFeatures: _tabular,
   );
 
+  /// A number carried over from last time and not yet confirmed. Lighter
+  /// than a logged value so the two are never confused at a glance.
+  static const metricPending = TextStyle(
+    fontFamily: kBodyFont,
+    fontSize: 20,
+    height: 1.2,
+    fontWeight: FontWeight.w400,
+    color: Bv.ink600,
+    fontFeatures: _tabular,
+  );
+
+  static const metricRpePending = TextStyle(
+    fontFamily: kBodyFont,
+    fontSize: 20,
+    height: 1.2,
+    fontWeight: FontWeight.w400,
+    color: Bv.lavender500,
+    fontFeatures: _tabular,
+  );
+
   /// An empty slot waiting to be filled.
   static const metricEmpty = TextStyle(
     fontFamily: kBodyFont,

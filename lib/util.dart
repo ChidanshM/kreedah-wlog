@@ -22,6 +22,19 @@ double fromKg(double kg, String unit) {
   return double.parse(v.toStringAsFixed(2));
 }
 
+/// Convert a displayed weight between units, rounding exactly once.
+///
+/// Going lb -> kg -> lb round-trips through a value already rounded to two
+/// decimals, which turns 15 lb into 14.99 lb. Rounding only at the end, and
+/// short-circuiting when the units already match, keeps entered numbers
+/// intact.
+double convertWeight(double value, String from, String to) {
+  if (from == to) return double.parse(value.toStringAsFixed(2));
+  final kg = from == 'lb' ? value * kLbToKg : value;
+  final out = to == 'lb' ? kg * kKgToLb : kg;
+  return double.parse(out.toStringAsFixed(2));
+}
+
 /// Drop trailing zeros: 20.00 -> "20", 20.41 -> "20.41", 2.50 -> "2.5"
 String num2(double v) {
   var s = v.toStringAsFixed(2);

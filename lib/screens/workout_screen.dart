@@ -509,28 +509,41 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: rows.map((r) => _weightCell(vm, r)).toList(),
+                    children:
+                        rows.map((r) => _weightCell(vm, r, done)).toList(),
                   ),
                 ),
                 SizedBox(
                   width: _colValue,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: rows.map((r) => _valueCell(vm, r)).toList(),
+                    children:
+                        rows.map((r) => _valueCell(vm, r, done)).toList(),
                   ),
                 ),
                 SizedBox(
                   width: _colRpe,
                   child: rpe == null
                       ? const Text('—', style: BvType.metricEmpty)
-                      : Text(num2(rpe), style: BvType.metricRpe),
+                      : Text(num2(rpe),
+                          style: done
+                              ? BvType.metricRpe
+                              : BvType.metricRpePending),
                 ),
                 SizedBox(
                   width: _colAction,
                   child: done
-                      ? const Align(
+                      ? Align(
                           alignment: Alignment.centerRight,
-                          child: Icon(Icons.check, color: Bv.sage600, size: 22),
+                          child: IconButton(
+                            tooltip: 'Undo this set',
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                                minWidth: 44, minHeight: 40),
+                            icon: const Icon(Icons.check_circle,
+                                color: Bv.sage600, size: 24),
+                            onPressed: () => _toggleDone(vm, setNumber),
+                          ),
                         )
                       : SizedBox(
                           height: 34,
@@ -552,7 +565,9 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     );
   }
 
-  Widget _weightCell(_ExerciseVM vm, Map<String, dynamic> r) {
+  /// Carried-over numbers render lighter than confirmed ones, so a
+  /// pre-filled set never looks like a logged set.
+  Widget _weightCell(_ExerciseVM vm, Map<String, dynamic> r, bool done) {
     final w = (r['weight_entered'] as num?)?.toDouble();
     final side = r['side'] as String;
     return Row(
@@ -564,12 +579,16 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                 style: BvType.label.copyWith(color: Bv.forest600)),
           ),
         Text(w == null ? '—' : num2(w),
-            style: w == null ? BvType.metricEmpty : BvType.metric),
+            style: w == null
+                ? BvType.metricEmpty
+                : done
+                    ? BvType.metric
+                    : BvType.metricPending),
       ],
     );
   }
 
-  Widget _valueCell(_ExerciseVM vm, Map<String, dynamic> r) {
+  Widget _valueCell(_ExerciseVM vm, Map<String, dynamic> r, bool done) {
     int? v;
     switch (vm.setType) {
       case SetType.time:
@@ -582,7 +601,11 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
         v = r['reps'] as int?;
     }
     return Text(v == null ? '—' : '$v',
-        style: v == null ? BvType.metricEmpty : BvType.metric);
+        style: v == null
+            ? BvType.metricEmpty
+            : done
+                ? BvType.metric
+                : BvType.metricPending);
   }
 }
 

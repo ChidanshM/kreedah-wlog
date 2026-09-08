@@ -133,8 +133,12 @@ class Db {
 
   // ---------------------------------------------------------------- routines
 
-  static Future<List<Map<String, dynamic>>> routines() =>
-      _db.query('routines', orderBy: 'position ASC, id ASC');
+  /// Returned as a mutable copy: sqflite hands back a read-only result set,
+  /// and a ReorderableListView needs to be able to move items within it.
+  static Future<List<Map<String, dynamic>>> routines() async =>
+      (await _db.query('routines', orderBy: 'position ASC, id ASC'))
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
 
   static Future<int> createRoutine(String name) async {
     final r = await _db.rawQuery('SELECT COALESCE(MAX(position), -1) m FROM routines');
@@ -178,11 +182,14 @@ class Db {
 
   // ------------------------------------------------------- routine exercises
 
-  static Future<List<Map<String, dynamic>>> routineExercises(int routineId) =>
-      _db.query('routine_exercises',
-          where: 'routine_id = ?',
-          whereArgs: [routineId],
-          orderBy: 'position ASC, id ASC');
+  static Future<List<Map<String, dynamic>>> routineExercises(
+          int routineId) async =>
+      (await _db.query('routine_exercises',
+              where: 'routine_id = ?',
+              whereArgs: [routineId],
+              orderBy: 'position ASC, id ASC'))
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
 
   static Future<int> addRoutineExercise(
     int routineId, {
@@ -368,11 +375,17 @@ class Db {
     final rows = await _db.query('sets', where: 'we_id = ?', whereArgs: [weId]);
     final batch = _db.batch();
     for (final s in rows) {
-      final kg = (s['weight_kg'] as num?)?.toDouble();
-      if (kg == null) continue;
+      final entered = (s['weight_entered'] as num?)?.toDouble();
+      final oldUnit = (s['entry_unit'] as String?) ?? 'kg';
+      if (entered == null) continue;
+      // Converting from what was typed, rather than from the stored kg value,
+      // avoids compounding the 2-decimal rounding on every switch.
       batch.update(
         'sets',
-        {'entry_unit': newUnit, 'weight_entered': fromKg(kg, newUnit)},
+        {
+          'entry_unit': newUnit,
+          'weight_entered': convertWeight(entered, oldUnit, newUnit),
+        },
         where: 'id = ?',
         whereArgs: [s['id']],
       );
