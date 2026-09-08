@@ -1,0 +1,56 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock
+
+# Generated platform folders
+#
+# android/ and ios/ are produced by `flutter create` at build time rather than
+# committed, so the toolchain version on the build machine always matches.
+# See .github/workflows/build-apk.yml.
+android/
+ios/
+linux/
+macos/
+windows/
+web/
+
+# Signing material — never commit
+*.jks
+*.keystore
+key.properties
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Skill files
+#
+# Maintained locally, deliberately not published. Platform principle 9 lists
+# `skills/` as part of the uniform repo setup; keeping it out of the remote is
+# a conscious deviation, not an oversight.
+skills/
+
+# Misc
+coverage/
