@@ -402,20 +402,36 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : ListView(
+          : ReorderableListView.builder(
               padding: const EdgeInsets.only(bottom: 110),
-              children: [
-                _volumeHeader(),
-                ..._exercises.map(_exerciseCard),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                  child: OutlinedButton.icon(
-                    onPressed: _addExercise,
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add exercise'),
-                  ),
+              itemCount: _exercises.length,
+              // Dragging starts from the handle only. The cards are full of
+              // tap targets, and a long press anywhere would rearrange the
+              // session while you were reaching for Log.
+              buildDefaultDragHandles: false,
+              header: _volumeHeader(),
+              footer: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                child: OutlinedButton.icon(
+                  onPressed: _addExercise,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add exercise'),
                 ),
-              ],
+              ),
+              onReorder: (oldIndex, newIndex) async {
+                if (newIndex > oldIndex) newIndex -= 1;
+                if (oldIndex == newIndex) return;
+                // Move locally first so the list settles under the finger,
+                // then persist and reload.
+                setState(() {
+                  final vm = _exercises.removeAt(oldIndex);
+                  _exercises.insert(newIndex, vm);
+                });
+                await Db.reorderWorkoutExercises(
+                    _exercises.map((e) => e.id).toList());
+                await _load();
+              },
+              itemBuilder: (context, i) => _exerciseCard(_exercises[i], i),
             ),
     );
   }
@@ -446,10 +462,11 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     );
   }
 
-  Widget _exerciseCard(_ExerciseVM vm) {
+  Widget _exerciseCard(_ExerciseVM vm, int index) {
     final note = vm.row['notes'] as String? ?? '';
 
     return Card(
+      key: ValueKey(vm.id),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(Bv.s4, Bv.s4, Bv.s4, Bv.s3),
         child: Column(
@@ -462,6 +479,14 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                 Padding(
                   padding: const EdgeInsets.only(left: Bv.s2, top: 2),
                   child: Text(vm.unit.toUpperCase(), style: BvType.label),
+                ),
+                ReorderableDragStartListener(
+                  index: index,
+                  child: const Padding(
+                    padding: EdgeInsets.fromLTRB(Bv.s3, 0, Bv.s1, Bv.s2),
+                    child: Icon(Icons.drag_indicator,
+                        size: 20, color: Bv.sand500),
+                  ),
                 ),
                 SizedBox(
                   height: 28,
