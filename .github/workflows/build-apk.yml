@@ -48,7 +48,11 @@ jobs:
 
       - name: Scaffold the Android project
         run: |
-          flutter create --org com.chidansh --project-name workout_log --platforms=android /tmp/app
+          # --org sets the Android application ID, here com.kreedah.workout_log.
+          # That string is the app's identity to Android: changing it makes a
+          # different app, side by side with the old one and unable to update
+          # it. It is also permanent once published anywhere.
+          flutter create --org com.kreedah --project-name workout_log --platforms=android /tmp/app
           rm -rf /tmp/app/lib /tmp/app/test
           DIR='${{ steps.src.outputs.dir }}'
           cp -r "$DIR/lib" "$DIR/assets" "$DIR/docs" "$DIR/pubspec.yaml" /tmp/app/

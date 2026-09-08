@@ -217,7 +217,7 @@ timestamp for every individual set.
 **`backup_<date>.json`** — a complete copy that **Restore from backup** reads
 back. Restoring replaces everything currently in the app.
 
-Both land in `Android/data/com.chidansh.workout_log/files/exports`.
+Both land in `Android/data/com.kreedah.workout_log/files/exports`.
 
 > **Known problem.** Android restricts that folder, so most file managers
 > cannot open it. Being fixed. Until then the export exists but is hard to

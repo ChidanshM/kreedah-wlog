@@ -41,7 +41,7 @@ another uninstall and another wipe.
 ```bash
 keytool -genkeypair -v -keystore wlog.jks -alias wlog \
   -keyalg RSA -keysize 4096 -validity 10000 \
-  -dname "CN=wlog, OU=personal, O=chidansh, L=, ST=, C="
+  -dname "CN=wlog, OU=personal, O=kreedah, L=, ST=, C="
 
 base64 -w0 wlog.jks > wlog.jks.b64
 ```
@@ -51,6 +51,16 @@ delete that file — it carries exactly the same risk as the keystore.
 
 Changing keys always costs one uninstall. Do it before accumulating training
 history, never after.
+
+## The application ID is separate, and also permanent
+
+`com.kreedah.workout_log`, set by `--org` in the workflow. Android treats it
+as the app's identity, so changing it produces a different app: it installs
+alongside the old one rather than updating it, and it cannot reach the old
+app's database or its export folder.
+
+It is fixed permanently the moment the app is published to any store. Settle
+it before that, never after.
 
 ## Verifying a build
 

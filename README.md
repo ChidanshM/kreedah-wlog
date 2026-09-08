@@ -23,7 +23,7 @@ Builds are signed with a fixed project key, so a new one installs over the previ
 ### Local build
 
 ```bash
-flutter create --org com.chidansh --project-name workout_log --platforms=android /tmp/app
+flutter create --org com.kreedah --project-name workout_log --platforms=android /tmp/app
 rm -rf /tmp/app/lib /tmp/app/test
 cp -r lib assets docs pubspec.yaml /tmp/app/
 cd /tmp/app
