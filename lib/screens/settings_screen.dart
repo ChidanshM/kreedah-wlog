@@ -1,10 +1,10 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 
 import '../db.dart';
 import '../export.dart';
 import '../library.dart';
+import '../saf.dart';
+import '../theme.dart';
 import 'equipment_screen.dart';
 import 'guide_screen.dart';
 
@@ -17,7 +17,8 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _showTimer = false;
-  String _exportPath = '';
+  String? _tree;
+  String _folderLabel = '';
   bool _busy = false;
 
   @override
@@ -28,18 +29,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _load() async {
     final showTimer = await Db.flag('show_timer');
-    final dir = await Exporter.exportDir();
+    final tree = await Db.setting(exportTreeKey);
+    final ok = await Saf.hasAccess(tree);
+    final label = ok ? await Saf.folderName(tree!) : '';
     if (!mounted) return;
     setState(() {
       _showTimer = showTimer;
-      _exportPath = dir.path;
+      _tree = ok ? tree : null;
+      _folderLabel = label;
     });
+  }
+
+  Future<void> _pickFolder() async {
+    try {
+      final tree = await Saf.pickFolder();
+      if (tree == null) return;
+      await Db.setSetting(exportTreeKey, tree);
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Exports will go to $_folderLabel.')),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not set the folder: $e')));
+      }
+    }
   }
 
   Future<void> _export() async {
     setState(() => _busy = true);
     try {
-      final files = await Exporter.exportAll();
+      final r = await Exporter.exportAll();
       if (!mounted) return;
       showDialog(
         context: context,
@@ -49,16 +71,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Two files written:'),
-              const SizedBox(height: 8),
-              ...files.map((f) => Padding(
+              ...r.names.map((n) => Padding(
                     padding: const EdgeInsets.only(bottom: 4),
-                    child: Text(f.path.split('/').last,
-                        style: Theme.of(c).textTheme.bodySmall),
+                    child: Text(n, style: BvType.bodySm),
                   )),
-              const SizedBox(height: 12),
-              Text('Folder:\n$_exportPath',
-                  style: Theme.of(c).textTheme.bodySmall),
+              const SizedBox(height: Bv.s3),
+              Text(
+                r.reachable
+                    ? 'Written to ${r.where}.'
+                    : 'Written to the app\'s own folder, which Android hides '
+                        'from file managers. Choose an export folder to put '
+                        'them somewhere you can reach.',
+                style: BvType.bodySm,
+              ),
             ],
           ),
           actions: [
@@ -85,8 +110,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         context: context,
         builder: (c) => AlertDialog(
           title: const Text('No backups found'),
-          content: Text(
-              'Put a backup .json file in this folder and try again:\n\n$_exportPath'),
+          content: Text(_tree == null
+              ? 'Choose an export folder first, then put a backup file in it.'
+              : 'No .json backup in $_folderLabel. Put one there and try again.'),
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(c), child: const Text('OK')),
@@ -96,16 +122,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
 
-    final chosen = await showModalBottomSheet<File>(
+    final chosen = await showModalBottomSheet<String>(
       context: context,
       builder: (c) => SafeArea(
         child: ListView(
           shrinkWrap: true,
           children: backups
-              .map((f) => ListTile(
+              .map((b) => ListTile(
                     leading: const Icon(Icons.restore_page_outlined),
-                    title: Text(f.path.split('/').last),
-                    onTap: () => Navigator.pop(c, f),
+                    title: Text(b.name),
+                    onTap: () => Navigator.pop(c, b.ref),
                   ))
               .toList(),
         ),
@@ -148,7 +174,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('More')),
       body: ListView(
@@ -158,8 +183,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: const Text('User guide'),
             subtitle: const Text('How every feature works, with examples'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const GuideScreen())),
+            onTap: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const GuideScreen())),
           ),
           const Divider(),
           ListTile(
@@ -168,8 +193,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: const Text('Your weights and gear'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () async {
-              await Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => const EquipmentScreen()));
+              await Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const EquipmentScreen()));
               await _load();
             },
           ),
@@ -187,6 +212,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const Divider(),
           ListTile(
+            leading: const Icon(Icons.folder_outlined),
+            title: const Text('Export folder'),
+            subtitle: Text(_tree == null
+                ? 'Not set — exports go somewhere Android hides'
+                : _folderLabel),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _pickFolder,
+          ),
+          ListTile(
             leading: const Icon(Icons.ios_share),
             title: const Text('Export'),
             subtitle: const Text('CSV of every set, plus a JSON backup'),
@@ -203,14 +237,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: _restore,
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            padding: const EdgeInsets.fromLTRB(Bv.s4, Bv.s2, Bv.s4, Bv.s6),
             child: Text(
               'Weight rule: kg is stored to 2 decimals and every summary '
               'statistic is in kg. The screen keeps whatever unit you typed, '
               'and the CSV carries an lb column filled in only for the sets '
-              'you actually entered in lb.\n\n'
-              'Export folder:\n$_exportPath',
-              style: theme.textTheme.bodySmall,
+              'you actually entered in lb.',
+              style: BvType.bodySm,
             ),
           ),
         ],

@@ -13,12 +13,15 @@ pubspec.lock
 # android/ and ios/ are produced by `flutter create` at build time rather than
 # committed, so the toolchain version on the build machine always matches.
 # See .github/workflows/build-apk.yml.
-android/
-ios/
-linux/
-macos/
-windows/
-web/
+#
+# Leading slashes matter: these ignore the generated folders at the repository
+# root only, not platform/android/ which holds source we do commit.
+/android/
+/ios/
+/linux/
+/macos/
+/windows/
+/web/
 
 # Signing material — never commit
 *.jks

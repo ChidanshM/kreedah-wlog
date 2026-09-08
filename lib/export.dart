@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'db.dart';
 import 'library.dart';
+import 'saf.dart';
 import 'util.dart';
 
 /// Export and backup.
@@ -140,35 +141,65 @@ class Exporter {
     return const JsonEncoder.withIndent('  ').convert(data);
   }
 
-  /// Writes both files and returns their paths.
-  static Future<List<File>> exportAll() async {
-    final dir = await exportDir();
+  /// Writes both files to wherever the user chose, falling back to the app's
+  /// own folder when no folder has been picked.
+  ///
+  /// Returns the names written and a description of where they went.
+  static Future<({List<String> names, String where, bool reachable})>
+      exportAll() async {
     final now = DateTime.now();
     final stamp =
         '${ymd(now)}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}';
+    final csvName = 'workout_sets_$stamp.csv';
+    final jsonName = 'backup_$stamp.json';
 
-    final csv = File('${dir.path}/workout_sets_$stamp.csv');
-    await csv.writeAsString(await buildCsv());
+    final tree = await Db.setting(exportTreeKey);
+    if (await Saf.hasAccess(tree)) {
+      await Saf.writeFile(
+          tree: tree!, name: csvName, mime: 'text/csv', content: await buildCsv());
+      await Saf.writeFile(
+          tree: tree,
+          name: jsonName,
+          mime: 'application/json',
+          content: await buildJson());
+      return (
+        names: [csvName, jsonName],
+        where: await Saf.folderName(tree),
+        reachable: true,
+      );
+    }
 
-    final json = File('${dir.path}/backup_$stamp.json');
-    await json.writeAsString(await buildJson());
-
-    return [csv, json];
+    final dir = await exportDir();
+    await File('${dir.path}/$csvName').writeAsString(await buildCsv());
+    await File('${dir.path}/$jsonName').writeAsString(await buildJson());
+    return (names: [csvName, jsonName], where: dir.path, reachable: false);
   }
 
-  /// Backup files sitting in the export folder, newest first.
-  static Future<List<File>> availableBackups() async {
+  /// Backups available to restore from, newest first.
+  static Future<List<({String name, String ref})>> availableBackups() async {
+    final tree = await Db.setting(exportTreeKey);
+    if (await Saf.hasAccess(tree)) {
+      final files = await Saf.listFiles(tree!, suffix: '.json');
+      return files
+          .map((f) => (name: f['name']!, ref: f['uri']!))
+          .toList(growable: false);
+    }
     final dir = await exportDir();
     final files = (await dir.list().toList())
         .whereType<File>()
         .where((f) => f.path.toLowerCase().endsWith('.json'))
-        .toList();
-    files.sort((a, b) => b.path.compareTo(a.path));
-    return files;
+        .toList()
+      ..sort((a, b) => b.path.compareTo(a.path));
+    return files
+        .map((f) => (name: f.path.split('/').last, ref: f.path))
+        .toList(growable: false);
   }
 
-  static Future<void> restoreFrom(File file) async {
-    final raw = await file.readAsString();
+  /// [ref] is either a document URI from the chosen folder or a file path.
+  static Future<void> restoreFrom(String ref) async {
+    final raw = ref.startsWith('content://')
+        ? await Saf.readFile(ref)
+        : await File(ref).readAsString();
     final data = jsonDecode(raw) as Map<String, dynamic>;
     if (data['format'] != 'workout_log_backup') {
       throw const FormatException('Not a workout log backup file.');

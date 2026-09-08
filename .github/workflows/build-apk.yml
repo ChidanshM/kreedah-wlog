@@ -56,6 +56,11 @@ jobs:
           rm -rf /tmp/app/lib /tmp/app/test
           DIR='${{ steps.src.outputs.dir }}'
           cp -r "$DIR/lib" "$DIR/assets" "$DIR/docs" "$DIR/pubspec.yaml" /tmp/app/
+          # Source we do keep for the Android side, copied over the generated
+          # tree. Currently MainActivity.kt, which carries the folder-picking
+          # bridge. Everything else under android/ stays generated.
+          cp -r "$DIR/platform/android/." /tmp/app/android/
+          find /tmp/app/android -name 'MainActivity.kt'
           sed -i 's/android:label="workout_log"/android:label="Workout Log"/' \
             /tmp/app/android/app/src/main/AndroidManifest.xml
 
