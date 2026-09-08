@@ -18,30 +18,82 @@ class GuideScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('User guide')),
-      body: FutureBuilder<String>(
-        future: rootBundle.loadString('docs/USER-GUIDE.md'),
-        builder: (context, snap) {
-          if (snap.hasError) {
-            return const Center(
+    return FutureBuilder<String>(
+      future: rootBundle.loadString('docs/USER-GUIDE.md'),
+      builder: (context, snap) {
+        if (snap.hasError) {
+          return Scaffold(
+            appBar: AppBar(title: const Text('User guide')),
+            body: const Center(
               child: Padding(
                 padding: EdgeInsets.all(Bv.s5),
                 child: Text('The guide could not be loaded.'),
               ),
-            );
-          }
-          if (!snap.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(Bv.s4, Bv.s4, Bv.s4, Bv.s6),
-            children: _render(context, snap.data!),
+            ),
           );
-        },
-      ),
+        }
+        if (!snap.hasData) {
+          return Scaffold(
+            appBar: AppBar(title: const Text('User guide')),
+            body: const Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final sections = _split(snap.data!);
+        return DefaultTabController(
+          length: sections.length,
+          child: Scaffold(
+            appBar: AppBar(
+              title: const Text('User guide'),
+              bottom: TabBar(
+                // Scrollable because there are ten or so sections and their
+                // names are worth more than two-letter abbreviations.
+                isScrollable: true,
+                tabAlignment: TabAlignment.start,
+                tabs: sections
+                    .map((s) => Tab(text: s.title))
+                    .toList(growable: false),
+              ),
+            ),
+            body: TabBarView(
+              children: sections
+                  .map((s) => ListView(
+                        key: PageStorageKey(s.title),
+                        padding: const EdgeInsets.fromLTRB(
+                            Bv.s4, Bv.s4, Bv.s4, Bv.s6),
+                        children: _render(context, s.body),
+                      ))
+                  .toList(growable: false),
+            ),
+          ),
+        );
+      },
     );
   }
+}
+
+/// Break the guide at its top-level headings, one tab each.
+///
+/// Anything before the first heading becomes the opening tab. The horizontal
+/// rules between sections are dropped, since the tabs already separate them.
+List<({String title, String body})> _split(String md) {
+  final out = <({String title, String body})>[];
+  final buf = <String>[];
+  var title = 'Start';
+
+  for (final line in md.split('\n')) {
+    if (line.startsWith('## ')) {
+      out.add((title: title, body: buf.join('\n').trim()));
+      title = line.substring(3).trim();
+      buf.clear();
+    } else if (line.trim() == '---') {
+      continue;
+    } else {
+      buf.add(line);
+    }
+  }
+  out.add((title: title, body: buf.join('\n').trim()));
+  return out.where((s) => s.body.isNotEmpty).toList(growable: false);
 }
 
 TextSpan _inline(String s, TextStyle base) {

@@ -6,7 +6,7 @@ and this document is a stopgap, not a substitute for fixing it.
 
 ---
 
-## Before anything else: Equipment
+## Equipment first
 
 **More → Equipment.** Do this first. It is the single thing that makes
 logging fast, and until it is filled in the app feels worse than it is.
@@ -129,7 +129,11 @@ the rotating counter drives whichever side you last tapped; the label reads
 
 ### When the equipment is busy
 
-Tap **···** on the exercise you want to move.
+Drag the grip in an exercise's header to move it up or down the session.
+Dragging starts from the grip only, so a slow tap on **Log** can never
+rearrange things by accident.
+
+For bigger jumps, tap **···** on the exercise:
 
 **Do this next** brings it forward to just after whatever you have already
 started — the single tap for "the squat rack is taken, do rows instead".
@@ -166,6 +170,42 @@ the Train screen to continue where you left off.
 
 ---
 
+## Missed sessions and fixes
+
+Trained without the phone, or logged something wrong? Both are the same
+screen.
+
+### Adding a session that already happened
+
+Two ways in: **Train → ··· on a routine → Log a past session**, or
+**History → + Past session**, which asks which routine first.
+
+Then it asks when. The **date** is all that is required. Add a **start time**
+if you remember it, and an **end time** only after that. A session with no
+time recorded says exactly that in the history rather than pretending it
+began at midnight.
+
+The sets arrive already filled in and already confirmed, because filling in
+last Tuesday is transcription rather than logging. Correct the numbers that
+are wrong and save.
+
+The numbers come from what you did *before* that date, not from your most
+recent session. Entering something from three weeks ago shows you three-week
+old numbers, which is the only thing that makes sense.
+
+### Fixing a session already logged
+
+**History → tap a session → the pencil.** It opens exactly like a live
+session: change any weight, rep count or RPE, drag exercises into a different
+order, add or remove them, edit the note.
+
+Tap the date under the title to change when it happened.
+
+**Save** keeps the changes without restamping the session as happening now.
+Anything you added but never confirmed is dropped, same as finishing.
+
+---
+
 ## History
 
 Every finished session, newest first, with its date and total volume. The
@@ -173,7 +213,9 @@ strip at the bottom shows session count and all-time tonnage.
 
 Tap one for the detail: start and finish time, volume, set count, total reps,
 heaviest lift, then every exercise and set with its RPE and per-set volume.
-The bin icon deletes it.
+The pencil opens it for editing, the bin deletes it.
+
+**+ Past session** adds one you did but never recorded.
 
 **All summary figures are in kilograms**, always, whatever unit you typed.
 That is what makes them comparable — you cannot add pounds to kilos and get
@@ -228,9 +270,31 @@ a USB cable. The export dialog tells you which happened.
 **Restore from backup** reads `.json` files from the same folder, so a backup
 copied back from a computer appears in the list.
 
+### Routines on their own
+
+A full backup carries everything and replaces everything on the way back in,
+which is too heavy for moving a single routine.
+
+**Train → ⋮ → Export routines** opens a checklist — pick any combination, or
+Select all. A single routine can also go out from its own **··· → Export this
+routine**. Either way you get one `wlog-routines_<date>.json`.
+
+**Train → ⋮ → Import routines** reads one back. It *adds*: nothing already in
+the app is touched, and a clashing name gains `(imported)` rather than
+overwriting. Import the same file twice and you get two copies.
+
+That is deliberately unlike **Restore**, which wipes and replaces. Two things
+that look similar and must not behave the same.
+
+Custom exercises a routine uses travel inside the file, so a routine never
+arrives somewhere pointing at an exercise that does not exist there.
+
+Import only sees files already sitting in your export folder. Getting one
+from elsewhere means putting it there first.
+
 ---
 
-## Settings worth knowing
+## Settings
 
 **Show session timer** — off by default, since your watch already times the
 session. The start time and a timestamp for every set are recorded either
@@ -240,16 +304,22 @@ way, so rest intervals can be reconstructed later even with the timer hidden.
 
 ## Updating the app
 
-Builds are signed with a fixed key, so a new version installs over the old
-one and keeps your data. Download the artifact from the Actions tab, take
-`app-arm64-v8a-release.apk`, and install it.
+Every build is published at **Releases → Latest**, which opens on a phone and
+needs no account. Take the file ending `-arm64-v8a.apk` unless you know your
+phone needs another architecture.
 
-If an install is ever refused, the signing key has changed. Do not force it —
-the only way through is to uninstall, and that deletes the database.
+Each build carries its own number, so `wlog-1.0.0-b47-arm64-v8a.apk` is build
+47. That number rises on its own and is how you tell one download from
+another.
+
+Builds are signed with a fixed key, so a new one installs over the old and
+keeps your data. If an install is ever refused, the signing key has changed.
+Do not force it — the only way through is to uninstall, and that deletes the
+database.
 
 ---
 
-## Things it deliberately does not do
+## Deliberate omissions
 
 - **Supersets.** No A1/A2 pairing. Log them as separate exercises.
 - **Warm-up flags.** Every logged set counts toward volume. Leave warm-ups
