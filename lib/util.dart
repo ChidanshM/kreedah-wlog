@@ -156,13 +156,16 @@ const rpeChoices = [6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0];
 ///
 /// A missing upper bound means a single value rather than a range, so "8"
 /// and "8 to 12" both read naturally without needing a separate flag.
+///
+/// Weights arrive already in [unit] and are printed as given. A target is
+/// stored as it was written rather than converted, so nothing here rounds.
 String? targetLabel({
   int? repsMin,
   int? repsMax,
   double? rpeMin,
   double? rpeMax,
-  double? weightMinKg,
-  double? weightMaxKg,
+  double? weightMin,
+  double? weightMax,
   String unit = 'kg',
   String setTypeCode = 'reps',
 }) {
@@ -180,11 +183,7 @@ String? targetLabel({
 
   final parts = <String>[];
 
-  final w = span(
-    weightMinKg == null ? null : fromKg(weightMinKg, unit),
-    weightMaxKg == null ? null : fromKg(weightMaxKg, unit),
-    (v) => num2(v.toDouble()),
-  );
+  final w = span(weightMin, weightMax, (v) => num2(v.toDouble()));
   if (w != null) parts.add('$w $unit');
 
   final reps = span(repsMin, repsMax, (v) => '${v.toInt()}');

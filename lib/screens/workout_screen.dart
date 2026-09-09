@@ -30,14 +30,15 @@ class _ExerciseVM {
   List<int> get setNumbers => setsBySetNumber.keys.toList()..sort();
 
   /// What the routine prescribed, frozen onto the session when it started so
-  /// a past session shows the target that applied then.
+  /// a past session shows the target that applied then. Weights are in this
+  /// exercise's own unit, not converted.
   String? get target => targetLabel(
         repsMin: (row['target_reps_min'] as num?)?.toInt(),
         repsMax: (row['target_reps_max'] as num?)?.toInt(),
         rpeMin: (row['target_rpe_min'] as num?)?.toDouble(),
         rpeMax: (row['target_rpe_max'] as num?)?.toDouble(),
-        weightMinKg: (row['target_weight_min_kg'] as num?)?.toDouble(),
-        weightMaxKg: (row['target_weight_max_kg'] as num?)?.toDouble(),
+        weightMin: (row['target_weight_min'] as num?)?.toDouble(),
+        weightMax: (row['target_weight_max'] as num?)?.toDouble(),
         unit: unit,
         setTypeCode: setType,
       );

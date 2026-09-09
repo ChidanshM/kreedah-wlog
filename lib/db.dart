@@ -10,15 +10,20 @@ class Db {
   static Database get raw => _db;
 
   /// What a routine prescribes. Null throughout means no target set; an
-  /// absent upper bound means a single value rather than a range. Weights
-  /// are kilograms like everywhere else, converted for display.
+  /// absent upper bound means a single value rather than a range.
+  ///
+  /// Weights here are in the exercise's own unit, unlike logged sets which
+  /// are canonical kilograms. A target is an intention rather than a
+  /// measurement: it is never summed with anything, so it gains nothing from
+  /// a canonical form, and round-tripping it through kilograms would return
+  /// a target of 15 lb as 14.99.
   static const _targetColumns = [
     'target_reps_min INTEGER',
     'target_reps_max INTEGER',
     'target_rpe_min REAL',
     'target_rpe_max REAL',
-    'target_weight_min_kg REAL',
-    'target_weight_max_kg REAL',
+    'target_weight_min REAL',
+    'target_weight_max REAL',
   ];
 
   static const targetFields = [
@@ -26,8 +31,8 @@ class Db {
     'target_reps_max',
     'target_rpe_min',
     'target_rpe_max',
-    'target_weight_min_kg',
-    'target_weight_max_kg',
+    'target_weight_min',
+    'target_weight_max',
   ];
 
   static Future<void> init() async {
@@ -81,8 +86,8 @@ class Db {
             target_reps_max INTEGER,
             target_rpe_min REAL,
             target_rpe_max REAL,
-            target_weight_min_kg REAL,
-            target_weight_max_kg REAL
+            target_weight_min REAL,
+            target_weight_max REAL
           )''');
 
         await d.execute('''
@@ -111,8 +116,8 @@ class Db {
             target_reps_max INTEGER,
             target_rpe_min REAL,
             target_rpe_max REAL,
-            target_weight_min_kg REAL,
-            target_weight_max_kg REAL
+            target_weight_min REAL,
+            target_weight_max REAL
           )''');
 
         // done = 0 means "planned, pre-filled, not yet confirmed".
@@ -483,8 +488,13 @@ class Db {
         confirmFilled: backdated,
         stamp: backdated ? isoLocal(start) : null,
         // With no history, the prescription is the best starting point there
-        // is. Better than empty fields on a routine's first outing.
-        fallbackWeightKg: (re['target_weight_min_kg'] as num?)?.toDouble(),
+        // is. Better than empty fields on a routine's first outing. The
+        // target is in the exercise's unit; a logged set is canonical, so it
+        // converts on the way in.
+        fallbackWeightKg: (re['target_weight_min'] as num?) == null
+            ? null
+            : toKg((re['target_weight_min'] as num).toDouble(),
+                re['unit'] as String),
         fallbackReps: (re['target_reps_min'] as num?)?.toInt(),
         fallbackRpe: (re['target_rpe_min'] as num?)?.toDouble(),
       );

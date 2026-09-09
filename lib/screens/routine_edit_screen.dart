@@ -158,8 +158,8 @@ class _RoutineEditScreenState extends State<RoutineEditScreen> {
       repsMax: (r['target_reps_max'] as num?)?.toInt(),
       rpeMin: (r['target_rpe_min'] as num?)?.toDouble(),
       rpeMax: (r['target_rpe_max'] as num?)?.toDouble(),
-      weightMinKg: (r['target_weight_min_kg'] as num?)?.toDouble(),
-      weightMaxKg: (r['target_weight_max_kg'] as num?)?.toDouble(),
+      weightMin: (r['target_weight_min'] as num?)?.toDouble(),
+      weightMax: (r['target_weight_max'] as num?)?.toDouble(),
       unit: r['unit'] as String,
       setTypeCode: r['set_type'] as String,
     );
@@ -187,15 +187,22 @@ class _ExerciseConfigSheetState extends State<_ExerciseConfigSheet> {
   late final _repsHi = _ctl(widget.row['target_reps_max']);
   late final _rpeLo = _ctl(widget.row['target_rpe_min']);
   late final _rpeHi = _ctl(widget.row['target_rpe_max']);
-  late final _wLo = _ctlKg(widget.row['target_weight_min_kg']);
-  late final _wHi = _ctlKg(widget.row['target_weight_max_kg']);
+  late final _wLo = _ctl(widget.row['target_weight_min']);
+  late final _wHi = _ctl(widget.row['target_weight_max']);
 
   TextEditingController _ctl(Object? v) => TextEditingController(
       text: v is num ? num2(v.toDouble()) : '');
 
-  /// Stored in kilograms, shown in whatever unit the exercise uses.
-  TextEditingController _ctlKg(Object? v) => TextEditingController(
-      text: v is num ? num2(fromKg(v.toDouble(), widget.row['unit'] as String)) : '');
+  /// Switching the unit converts what is already typed, so the target keeps
+  /// meaning the same load rather than silently becoming a different one.
+  void _switchUnit(String to) {
+    if (to == _unit) return;
+    for (final c in [_wLo, _wHi]) {
+      final v = _num(c);
+      if (v != null) c.text = num2(convertWeight(v, _unit, to));
+    }
+    setState(() => _unit = to);
+  }
 
   @override
   void dispose() {
@@ -287,7 +294,7 @@ class _ExerciseConfigSheetState extends State<_ExerciseConfigSheet> {
                   .map((u) => ChoiceChip(
                         label: Text(u.toUpperCase()),
                         selected: _unit == u,
-                        onSelected: (_) => setState(() => _unit = u),
+                        onSelected: (_) => _switchUnit(u),
                       ))
                   .toList(),
             ),
@@ -347,8 +354,6 @@ class _ExerciseConfigSheetState extends State<_ExerciseConfigSheet> {
                 const Spacer(),
                 FilledButton(
                   onPressed: () {
-                    final wLo = _num(_wLo);
-                    final wHi = _num(_wHi);
                     Navigator.pop(context, {
                       'set_type': _setType,
                       'unit': _unit,
@@ -358,10 +363,9 @@ class _ExerciseConfigSheetState extends State<_ExerciseConfigSheet> {
                       'target_reps_max': _num(_repsHi)?.round(),
                       'target_rpe_min': _num(_rpeLo),
                       'target_rpe_max': _num(_rpeHi),
-                      'target_weight_min_kg':
-                          wLo == null ? null : convertWeight(wLo, _unit, 'kg'),
-                      'target_weight_max_kg':
-                          wHi == null ? null : convertWeight(wHi, _unit, 'kg'),
+                      // Stored exactly as typed, in the unit above.
+                      'target_weight_min': _num(_wLo),
+                      'target_weight_max': _num(_wHi),
                     });
                   },
                   child: const Text('Save'),
