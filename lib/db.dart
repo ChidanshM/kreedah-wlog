@@ -426,11 +426,43 @@ class Db {
     return r.isEmpty ? null : r.first;
   }
 
-  static Future<List<Map<String, dynamic>>> workoutHistory({int limit = 200}) =>
-      _db.query('workouts',
-          where: 'ended_at IS NOT NULL',
-          orderBy: 'started_at DESC',
-          limit: limit);
+  static Future<List<Map<String, dynamic>>> workoutHistory({
+    int limit = 200,
+    String? fromIso,
+    String? toIso,
+    List<int>? routineIds,
+  }) async {
+    final where = <String>['ended_at IS NOT NULL'];
+    final args = <Object?>[];
+    if (fromIso != null) {
+      where.add('started_at >= ?');
+      args.add(fromIso);
+    }
+    if (toIso != null) {
+      where.add('started_at < ?');
+      args.add(toIso);
+    }
+    if (routineIds != null && routineIds.isNotEmpty) {
+      final marks = List.filled(routineIds.length, '?').join(', ');
+      where.add('routine_id IN ($marks)');
+      args.addAll(routineIds);
+    }
+    return (await _db.query('workouts',
+            where: where.join(' AND '),
+            whereArgs: args,
+            orderBy: 'started_at DESC',
+            limit: limit))
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+  }
+
+  /// Rename a session without unlinking it.
+  ///
+  /// Only the label changes; routine_id stays put, so the session still
+  /// counts as that routine for pre-filling and for filtering.
+  static Future<void> setWorkoutName(int id, String name) => _db.update(
+      'workouts', {'routine_name': name},
+      where: 'id = ?', whereArgs: [id]);
 
   /// Start a session from a routine: copies the exercise list, then
   /// pre-fills every set from the last time this routine was trained.
