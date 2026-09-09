@@ -183,9 +183,19 @@ class MainActivity : FlutterActivity() {
      * The app itself makes no network requests and holds no internet
      * permission; the browser does the fetching. That keeps the update check
      * from turning this into a connected app.
+     *
+     * Restricted to http and https. ACTION_VIEW will happily launch other
+     * applications through their own schemes, so an unrestricted version
+     * would be a way to reach them if a link ever came from somewhere other
+     * than a constant in this app.
      */
     private fun openUrl(url: String, result: MethodChannel.Result) {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        val uri = Uri.parse(url)
+        if (uri.scheme != "https" && uri.scheme != "http") {
+            result.error("bad_scheme", "Only http and https links can be opened", null)
+            return
+        }
+        val intent = Intent(Intent.ACTION_VIEW, uri)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
             startActivity(intent)
