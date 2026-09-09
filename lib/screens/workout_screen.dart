@@ -636,7 +636,6 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   Widget _setRow(_ExerciseVM vm, int setNumber) {
     final rows = vm.setsBySetNumber[setNumber]!;
     final done = rows.every((r) => (r['done'] as int) == 1);
-    final rpe = (rows.first['rpe'] as num?)?.toDouble();
 
     return Padding(
       padding: const EdgeInsets.only(bottom: Bv.s1),
@@ -674,12 +673,10 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                 ),
                 SizedBox(
                   width: _colRpe,
-                  child: rpe == null
-                      ? const Text('—', style: BvType.metricEmpty)
-                      : Text(num2(rpe),
-                          style: done
-                              ? BvType.metricRpe
-                              : BvType.metricRpePending),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: rows.map((r) => _rpeCell(r, done)).toList(),
+                  ),
                 ),
                 SizedBox(
                   width: _colAction,
@@ -718,6 +715,18 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
 
   /// Carried-over numbers render lighter than confirmed ones, so a
   /// pre-filled set never looks like a logged set.
+  Widget _rpeCell(Map<String, dynamic> r, bool done) {
+    final rpe = (r['rpe'] as num?)?.toDouble();
+    return Text(
+      rpe == null ? '—' : num2(rpe),
+      style: rpe == null
+          ? BvType.metricEmpty
+          : done
+              ? BvType.metricRpe
+              : BvType.metricRpePending,
+    );
+  }
+
   Widget _weightCell(_ExerciseVM vm, Map<String, dynamic> r, bool done) {
     final w = (r['weight_entered'] as num?)?.toDouble();
     final side = r['side'] as String;

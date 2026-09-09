@@ -7,7 +7,7 @@ import '../theme.dart';
 import '../util.dart';
 
 /// Edits one set. For a unilateral exercise, [rows] holds two records
-/// (right first, then left) which share a single RPE.
+/// (right first, then left), each carrying its own weight, count and RPE.
 ///
 /// Returns true if anything was saved.
 Future<bool?> editSet({
@@ -58,8 +58,10 @@ class SetEditorSheet extends StatefulWidget {
 class _SetEditorSheetState extends State<SetEditorSheet> {
   final _weight = <int, TextEditingController>{};
   final _value = <int, TextEditingController>{};
+  /// One effort rating per side. The weaker side often works harder at the
+  /// same load, which is the whole reason for logging sides separately.
+  final _rpe = <int, double?>{};
   int _focusedRow = 0;
-  double? _rpe;
   List<double> _chipWeights = const [];
 
   /// The rotating counter and the text field are two views of one value.
@@ -121,8 +123,8 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
       final w = (r['weight_entered'] as num?)?.toDouble();
       _weight[id] = TextEditingController(text: w == null ? '' : num2(w));
       _value[id] = TextEditingController(text: _valueText(r));
+      _rpe[id] = (r['rpe'] as num?)?.toDouble();
     }
-    _rpe = (widget.rows.first['rpe'] as num?)?.toDouble();
     _focusedRow = widget.rows.first['id'] as int;
     _wheel = FixedExtentScrollController(
         initialItem: _indexFor(_value[_focusedRow]!.text));
@@ -211,7 +213,7 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
         reps: widget.setType == SetType.reps ? value : null,
         durationSec: widget.setType == SetType.time ? value : null,
         distanceSteps: widget.setType == SetType.distance ? value : null,
-        rpe: _rpe,
+        rpe: _rpe[id],
         done: done,
       );
     }
@@ -256,29 +258,7 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
             const SizedBox(height: 16),
             _wheelPicker(),
             const SizedBox(height: 16),
-            Row(
-              children: [
-                Text('RPE', style: theme.textTheme.labelMedium),
-                const SizedBox(width: 8),
-                if (_rpe != null)
-                  TextButton(
-                    onPressed: () => setState(() => _rpe = null),
-                    child: const Text('clear'),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Wrap(
-              spacing: 6,
-              runSpacing: 4,
-              children: rpeChoices
-                  .map((v) => ChoiceChip(
-                        label: Text(num2(v)),
-                        selected: _rpe == v,
-                        onSelected: (_) => setState(() => _rpe = v),
-                      ))
-                  .toList(),
-            ),
+            _rpeBlock(),
             const SizedBox(height: 20),
             Row(
               children: [
@@ -364,10 +344,50 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
     );
   }
 
+  /// Effort rating for whichever side is focused, matching how the rotating
+  /// counter behaves. Two full chip rows would push the Log button off screen.
+  Widget _rpeBlock() {
+    final multi = widget.rows.length > 1;
+    final side = multi
+        ? '  ${widget.rows.firstWhere((r) => r['id'] == _focusedRow, orElse: () => widget.rows.first)['side']}'
+        : '';
+    final current = _rpe[_focusedRow];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text('RPE$side', style: BvType.label),
+            const Spacer(),
+            if (current != null)
+              TextButton(
+                onPressed: () => setState(() => _rpe[_focusedRow] = null),
+                child: const Text('clear'),
+              ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Wrap(
+          spacing: 6,
+          runSpacing: 4,
+          children: rpeChoices
+              .map((v) => ChoiceChip(
+                    label: Text(num2(v)),
+                    selected: current == v,
+                    onSelected: (_) => setState(() => _rpe[_focusedRow] = v),
+                  ))
+              .toList(),
+        ),
+      ],
+    );
+  }
+
   Widget _sideBlock(Map<String, dynamic> r) {
     final id = r['id'] as int;
     final side = r['side'] as String;
-    final showWeight = true;
+    final focused = _focusedRow == id;
+    final rpe = _rpe[id];
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -377,29 +397,41 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
           if (side != 'both')
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
-              child: Text(
-                side == 'R' ? 'Right' : 'Left',
-                style: Theme.of(context).textTheme.labelLarge,
+              child: Row(
+                children: [
+                  Text(
+                    side == 'R' ? 'Right' : 'Left',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: focused ? Bv.forest800 : Bv.ink600,
+                          fontWeight:
+                              focused ? FontWeight.w600 : FontWeight.w400,
+                        ),
+                  ),
+                  const Spacer(),
+                  // Both sides' ratings stay visible, so the chips below only
+                  // need to change one at a time.
+                  Text(rpe == null ? 'RPE —' : 'RPE ${num2(rpe)}',
+                      style: BvType.label),
+                ],
               ),
             ),
           Row(
             children: [
-              if (showWeight)
-                Expanded(
-                  child: TextField(
-                    controller: _weight[id],
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                    ],
-                    decoration: InputDecoration(
-                      labelText: 'Weight (${widget.unit})',
-                    ),
-                    onTap: () => _focusRow(id),
+              Expanded(
+                child: TextField(
+                  controller: _weight[id],
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                  ],
+                  decoration: InputDecoration(
+                    labelText: 'Weight (${widget.unit})',
                   ),
+                  onTap: () => _focusRow(id),
                 ),
-              if (showWeight) const SizedBox(width: 12),
+              ),
+              const SizedBox(width: 12),
               Expanded(
                 child: TextField(
                   controller: _value[id],

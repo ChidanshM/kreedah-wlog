@@ -62,9 +62,10 @@ metric and the cable stack is imperial, set each accordingly and stop
 converting in your head.
 
 **Unilateral** — turn on for anything done one side at a time. Each set then
-records right and left separately, in that order, sharing one RPE. Both sides
-count toward volume. The app guesses this from the exercise name — anything
-called "single-arm" or "alternating" defaults to on — but check it.
+records right and left separately, in that order, each with its own weight,
+reps and RPE. Both sides count toward volume. The app guesses this from the
+exercise name — anything called "single-arm" or "alternating" defaults to on
+— but check it.
 
 **Sets** — how many appear pre-filled when you start. Change it mid-session
 freely; this is a starting point, not a commitment.
@@ -123,9 +124,11 @@ two or three.
 **Save draft** keeps the numbers without marking the set done — useful for
 setting up a set before you do it. **Log set** records it as completed.
 
-For a unilateral exercise the editor shows Right and Left separately, and
-the rotating counter drives whichever side you last tapped; the label reads
-`REPS R` or `REPS L`.
+For a unilateral exercise the editor shows Right and Left separately, each
+with its own weight, count and RPE. The rotating counter and the RPE chips
+both act on whichever side you last tapped — the labels read `REPS R` and
+`RPE R` so you can see which. Each side's current rating stays visible beside
+its name, so you can tell them apart without switching back and forth.
 
 ### When the equipment is busy
 

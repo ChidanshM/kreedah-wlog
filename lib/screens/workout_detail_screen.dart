@@ -151,7 +151,6 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
                         ),
                         ...numbers.map((n) {
                           final g = grouped[n]!;
-                          final rpe = (g.first['rpe'] as num?)?.toDouble();
                           final vol = g.fold<double>(
                               0,
                               (a, s) =>
@@ -160,14 +159,26 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
                             padding:
                                 const EdgeInsets.fromLTRB(16, 2, 16, 2),
                             child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 SizedBox(width: 24, child: Text('$n')),
                                 Expanded(
                                     child: Text(_describe(
                                         e['set_type'] as String, g))),
-                                if (rpe != null)
-                                  Text('RPE ${num2(rpe)}',
-                                      style: theme.textTheme.labelSmall),
+                                // One rating per side, stacked to line up with
+                                // the sides described alongside them.
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: g.map((s) {
+                                    final rpe =
+                                        (s['rpe'] as num?)?.toDouble();
+                                    return Text(
+                                        rpe == null
+                                            ? ''
+                                            : 'RPE ${num2(rpe)}',
+                                        style: theme.textTheme.labelSmall);
+                                  }).toList(),
+                                ),
                                 if (vol > 0)
                                   Padding(
                                     padding: const EdgeInsets.only(left: 10),
