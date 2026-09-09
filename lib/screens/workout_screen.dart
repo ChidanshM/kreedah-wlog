@@ -28,6 +28,19 @@ class _ExerciseVM {
   String get unit => row['unit'] as String;
   bool get unilateral => (row['unilateral'] as int) == 1;
   List<int> get setNumbers => setsBySetNumber.keys.toList()..sort();
+
+  /// What the routine prescribed, frozen onto the session when it started so
+  /// a past session shows the target that applied then.
+  String? get target => targetLabel(
+        repsMin: (row['target_reps_min'] as num?)?.toInt(),
+        repsMax: (row['target_reps_max'] as num?)?.toInt(),
+        rpeMin: (row['target_rpe_min'] as num?)?.toDouble(),
+        rpeMax: (row['target_rpe_max'] as num?)?.toDouble(),
+        weightMinKg: (row['target_weight_min_kg'] as num?)?.toDouble(),
+        weightMaxKg: (row['target_weight_max_kg'] as num?)?.toDouble(),
+        unit: unit,
+        setTypeCode: setType,
+      );
 }
 
 class WorkoutScreen extends StatefulWidget {
@@ -563,6 +576,12 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
               Padding(
                 padding: const EdgeInsets.only(top: 2),
                 child: Text(vm.hint!, style: BvType.bodySm),
+              ),
+            if (vm.target != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(vm.target!,
+                    style: BvType.bodySm.copyWith(color: Bv.forest700)),
               ),
             if (note.isNotEmpty)
               Padding(

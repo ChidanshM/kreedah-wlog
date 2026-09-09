@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../db.dart';
 import '../library.dart';
+import '../theme.dart';
 import '../util.dart';
 import 'exercise_picker.dart';
 
@@ -151,7 +153,17 @@ class _RoutineEditScreenState extends State<RoutineEditScreen> {
       (r['unit'] as String).toUpperCase(),
     ];
     if ((r['unilateral'] as int) == 1) parts.add('R then L');
-    return parts.join(', ');
+    final t = targetLabel(
+      repsMin: (r['target_reps_min'] as num?)?.toInt(),
+      repsMax: (r['target_reps_max'] as num?)?.toInt(),
+      rpeMin: (r['target_rpe_min'] as num?)?.toDouble(),
+      rpeMax: (r['target_rpe_max'] as num?)?.toDouble(),
+      weightMinKg: (r['target_weight_min_kg'] as num?)?.toDouble(),
+      weightMaxKg: (r['target_weight_max_kg'] as num?)?.toDouble(),
+      unit: r['unit'] as String,
+      setTypeCode: r['set_type'] as String,
+    );
+    return t == null ? parts.join(', ') : '${parts.join(', ')}\n$t';
   }
 }
 
@@ -168,6 +180,78 @@ class _ExerciseConfigSheetState extends State<_ExerciseConfigSheet> {
   late String _unit = widget.row['unit'] as String;
   late bool _unilateral = (widget.row['unilateral'] as int) == 1;
   late int _sets = widget.row['target_sets'] as int;
+
+  // Targets. Each is a low value and an optional high one: leave the second
+  // empty for a single figure rather than a range.
+  late final _repsLo = _ctl(widget.row['target_reps_min']);
+  late final _repsHi = _ctl(widget.row['target_reps_max']);
+  late final _rpeLo = _ctl(widget.row['target_rpe_min']);
+  late final _rpeHi = _ctl(widget.row['target_rpe_max']);
+  late final _wLo = _ctlKg(widget.row['target_weight_min_kg']);
+  late final _wHi = _ctlKg(widget.row['target_weight_max_kg']);
+
+  TextEditingController _ctl(Object? v) => TextEditingController(
+      text: v is num ? num2(v.toDouble()) : '');
+
+  /// Stored in kilograms, shown in whatever unit the exercise uses.
+  TextEditingController _ctlKg(Object? v) => TextEditingController(
+      text: v is num ? num2(fromKg(v.toDouble(), widget.row['unit'] as String)) : '');
+
+  @override
+  void dispose() {
+    for (final c in [_repsLo, _repsHi, _rpeLo, _rpeHi, _wLo, _wHi]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  double? _num(TextEditingController c) {
+    final t = c.text.trim();
+    return t.isEmpty ? null : double.tryParse(t);
+  }
+
+  Widget _rangeRow(String label, TextEditingController lo,
+      TextEditingController hi, String suffix) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          SizedBox(width: 86, child: Text(label, style: BvType.label)),
+          Expanded(
+            child: TextField(
+              controller: lo,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
+              ],
+              decoration: const InputDecoration(hintText: 'from'),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 8),
+            child: Text('to'),
+          ),
+          Expanded(
+            child: TextField(
+              controller: hi,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
+              ],
+              decoration: const InputDecoration(hintText: 'optional'),
+            ),
+          ),
+          SizedBox(
+            width: 34,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 6),
+              child: Text(suffix, style: BvType.bodySm),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -231,6 +315,27 @@ class _ExerciseConfigSheetState extends State<_ExerciseConfigSheet> {
               ],
             ),
             const SizedBox(height: 8),
+            const Divider(),
+            const SizedBox(height: 4),
+            Text('WHAT TO AIM FOR', style: BvType.label),
+            const SizedBox(height: 2),
+            Text(
+              'All optional. Fill only the first box for a single figure.',
+              style: BvType.bodySm,
+            ),
+            const SizedBox(height: 12),
+            _rangeRow(
+                _setType == SetType.time
+                    ? 'Seconds'
+                    : _setType == SetType.distance
+                        ? 'Steps'
+                        : 'Reps',
+                _repsLo,
+                _repsHi,
+                ''),
+            _rangeRow('Weight', _wLo, _wHi, _unit),
+            _rangeRow('RPE', _rpeLo, _rpeHi, ''),
+            const SizedBox(height: 4),
             Row(
               children: [
                 TextButton.icon(
@@ -241,12 +346,24 @@ class _ExerciseConfigSheetState extends State<_ExerciseConfigSheet> {
                 ),
                 const Spacer(),
                 FilledButton(
-                  onPressed: () => Navigator.pop(context, {
-                    'set_type': _setType,
-                    'unit': _unit,
-                    'unilateral': _unilateral ? 1 : 0,
-                    'target_sets': _sets,
-                  }),
+                  onPressed: () {
+                    final wLo = _num(_wLo);
+                    final wHi = _num(_wHi);
+                    Navigator.pop(context, {
+                      'set_type': _setType,
+                      'unit': _unit,
+                      'unilateral': _unilateral ? 1 : 0,
+                      'target_sets': _sets,
+                      'target_reps_min': _num(_repsLo)?.round(),
+                      'target_reps_max': _num(_repsHi)?.round(),
+                      'target_rpe_min': _num(_rpeLo),
+                      'target_rpe_max': _num(_rpeHi),
+                      'target_weight_min_kg':
+                          wLo == null ? null : convertWeight(wLo, _unit, 'kg'),
+                      'target_weight_max_kg':
+                          wHi == null ? null : convertWeight(wHi, _unit, 'kg'),
+                    });
+                  },
                   child: const Text('Save'),
                 ),
               ],

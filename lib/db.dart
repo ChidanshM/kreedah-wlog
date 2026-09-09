@@ -9,11 +9,32 @@ class Db {
   static late Database _db;
   static Database get raw => _db;
 
+  /// What a routine prescribes. Null throughout means no target set; an
+  /// absent upper bound means a single value rather than a range. Weights
+  /// are kilograms like everywhere else, converted for display.
+  static const _targetColumns = [
+    'target_reps_min INTEGER',
+    'target_reps_max INTEGER',
+    'target_rpe_min REAL',
+    'target_rpe_max REAL',
+    'target_weight_min_kg REAL',
+    'target_weight_max_kg REAL',
+  ];
+
+  static const targetFields = [
+    'target_reps_min',
+    'target_reps_max',
+    'target_rpe_min',
+    'target_rpe_max',
+    'target_weight_min_kg',
+    'target_weight_max_kg',
+  ];
+
   static Future<void> init() async {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'workout_log.db'),
-      version: 2,
+      version: 3,
       onConfigure: (d) async {
         await d.execute('PRAGMA foreign_keys = ON');
       },
@@ -24,6 +45,16 @@ class Db {
         if (from < 2) {
           await d.execute(
               'ALTER TABLE workouts ADD COLUMN time_known INTEGER NOT NULL DEFAULT 1');
+        }
+        // v3: a routine can prescribe what to aim for. Copied onto the
+        // session as well, so a past session shows the target that applied at
+        // the time rather than whatever the routine says now.
+        if (from < 3) {
+          for (final t in ['routine_exercises', 'workout_exercises']) {
+            for (final c in _targetColumns) {
+              await d.execute('ALTER TABLE $t ADD COLUMN $c');
+            }
+          }
         }
       },
       onCreate: (d, v) async {
@@ -45,7 +76,13 @@ class Db {
             set_type TEXT NOT NULL DEFAULT 'reps',
             unilateral INTEGER NOT NULL DEFAULT 0,
             unit TEXT NOT NULL DEFAULT 'kg',
-            target_sets INTEGER NOT NULL DEFAULT 3
+            target_sets INTEGER NOT NULL DEFAULT 3,
+            target_reps_min INTEGER,
+            target_reps_max INTEGER,
+            target_rpe_min REAL,
+            target_rpe_max REAL,
+            target_weight_min_kg REAL,
+            target_weight_max_kg REAL
           )''');
 
         await d.execute('''
@@ -69,7 +106,13 @@ class Db {
             set_type TEXT NOT NULL DEFAULT 'reps',
             unilateral INTEGER NOT NULL DEFAULT 0,
             unit TEXT NOT NULL DEFAULT 'kg',
-            notes TEXT NOT NULL DEFAULT ''
+            notes TEXT NOT NULL DEFAULT '',
+            target_reps_min INTEGER,
+            target_reps_max INTEGER,
+            target_rpe_min REAL,
+            target_rpe_max REAL,
+            target_weight_min_kg REAL,
+            target_weight_max_kg REAL
           )''');
 
         // done = 0 means "planned, pre-filled, not yet confirmed".
@@ -271,6 +314,7 @@ class Db {
                   'unilateral': e['unilateral'],
                   'unit': e['unit'],
                   'target_sets': e['target_sets'],
+                  for (final f in targetFields) f: e[f],
                 })
             .toList(),
       });
@@ -294,8 +338,18 @@ class Db {
   /// Adds routines from an export. Never overwrites: a clashing name gains a
   /// suffix, so importing can lose nothing that is already here.
   static Future<int> importRoutines(Map<String, dynamic> data) async {
+    // Same care as restore: these keys come from a file and land in the SQL
+    // statement as column names, not as bound values, so they are checked
+    // against the real schema before use.
+    final allowed = await _columnsOf(_db, 'custom_exercises');
     for (final row in (data['custom_exercises'] as List? ?? const [])) {
-      await _db.insert('custom_exercises', Map<String, dynamic>.from(row as Map),
+      if (row is! Map) continue;
+      final clean = <String, Object?>{};
+      row.forEach((k, v) {
+        if (k is String && allowed.contains(k)) clean[k] = v;
+      });
+      if (clean['k'] is! String) continue;
+      await _db.insert('custom_exercises', clean,
           conflictAlgorithm: ConflictAlgorithm.replace);
     }
 
@@ -316,15 +370,37 @@ class Db {
             ((a['position'] as num?) ?? 0).compareTo((b['position'] as num?) ?? 0));
 
       for (final ex in exercises) {
+        final key = ex['ex_key'];
+        final label = ex['ex_name'];
+        if (key is! String || label is! String) continue;
         await addRoutineExercise(
           newId,
-          exKey: ex['ex_key'] as String,
-          exName: ex['ex_name'] as String,
-          setType: (ex['set_type'] as String?) ?? SetType.reps,
+          exKey: key,
+          exName: label,
+          setType: SetType.all.contains(ex['set_type'])
+              ? ex['set_type'] as String
+              : SetType.reps,
           unilateral: ((ex['unilateral'] as num?) ?? 0) == 1,
-          unit: (ex['unit'] as String?) ?? 'kg',
-          targetSets: ((ex['target_sets'] as num?) ?? 3).toInt(),
+          unit: ex['unit'] == 'lb' ? 'lb' : 'kg',
+          targetSets: ((ex['target_sets'] as num?) ?? 3).toInt().clamp(1, 20),
         );
+        // Targets are optional and arbitrary numbers, so they are written
+        // after the row exists rather than widening the insert helper.
+        final patch = <String, Object?>{};
+        for (final f in targetFields) {
+          final v = ex[f];
+          if (v is num) patch[f] = v;
+        }
+        if (patch.isNotEmpty) {
+          final rows = await _db.query('routine_exercises',
+              where: 'routine_id = ?',
+              whereArgs: [newId],
+              orderBy: 'position DESC, id DESC',
+              limit: 1);
+          if (rows.isNotEmpty) {
+            await updateRoutineExercise(rows.first['id'] as int, patch);
+          }
+        }
       }
       added++;
     }
@@ -388,6 +464,7 @@ class Db {
         'unilateral': re['unilateral'],
         'unit': re['unit'],
         'notes': '',
+        for (final f in targetFields) f: re[f],
       });
 
       final last = await lastPerformance(
@@ -405,6 +482,11 @@ class Db {
         previous: last?['sets'] as List<Map<String, dynamic>>?,
         confirmFilled: backdated,
         stamp: backdated ? isoLocal(start) : null,
+        // With no history, the prescription is the best starting point there
+        // is. Better than empty fields on a routine's first outing.
+        fallbackWeightKg: (re['target_weight_min_kg'] as num?)?.toDouble(),
+        fallbackReps: (re['target_reps_min'] as num?)?.toInt(),
+        fallbackRpe: (re['target_rpe_min'] as num?)?.toDouble(),
       );
     }
     return workoutId;
@@ -574,6 +656,9 @@ class Db {
     List<Map<String, dynamic>>? previous,
     bool confirmFilled = false,
     String? stamp,
+    double? fallbackWeightKg,
+    int? fallbackReps,
+    double? fallbackRpe,
   }) async {
     // Group the previous performance by set number.
     final prevBySet = <int, List<Map<String, dynamic>>>{};
@@ -598,16 +683,19 @@ class Db {
             orElse: () => source.first,
           );
         }
-        final kg = (src?['weight_kg'] as num?)?.toDouble();
+        final kg = (src?['weight_kg'] as num?)?.toDouble() ?? fallbackWeightKg;
+        final reps = (src?['reps'] as int?) ??
+            (setType == SetType.reps ? fallbackReps : null);
+        final rpe = (src?['rpe'] as num?)?.toDouble() ?? fallbackRpe;
         // Backdated sessions arrive already confirmed where there is
         // something to confirm, since filling one in is transcription.
         final filled = kg != null ||
-            src?['reps'] != null ||
+            reps != null ||
             src?['duration_sec'] != null ||
             src?['distance_steps'] != null;
         final done = confirmFilled && filled;
-        final vol = (setType == SetType.reps && kg != null && src?['reps'] != null)
-            ? kg * (src!['reps'] as int)
+        final vol = (setType == SetType.reps && kg != null && reps != null)
+            ? kg * reps
             : 0.0;
         batch.insert('sets', {
           'we_id': weId,
@@ -616,10 +704,10 @@ class Db {
           'entry_unit': unit,
           'weight_entered': kg == null ? null : fromKg(kg, unit),
           'weight_kg': kg,
-          'reps': src?['reps'],
+          'reps': reps,
           'duration_sec': src?['duration_sec'],
           'distance_steps': src?['distance_steps'],
-          'rpe': src?['rpe'],
+          'rpe': rpe,
           'volume_kg': done ? double.parse(vol.toStringAsFixed(2)) : 0,
           'done': done ? 1 : 0,
           'ts': done ? stamp : null,

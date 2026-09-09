@@ -152,6 +152,51 @@ class SetType {
 
 const rpeChoices = [6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0];
 
+/// Renders a prescribed target as one line, or null when nothing is set.
+///
+/// A missing upper bound means a single value rather than a range, so "8"
+/// and "8 to 12" both read naturally without needing a separate flag.
+String? targetLabel({
+  int? repsMin,
+  int? repsMax,
+  double? rpeMin,
+  double? rpeMax,
+  double? weightMinKg,
+  double? weightMaxKg,
+  String unit = 'kg',
+  String setTypeCode = 'reps',
+}) {
+  String? span(num? a, num? b, String Function(num) fmt) {
+    if (a == null) return null;
+    if (b == null || b == a) return fmt(a);
+    return '${fmt(a)}\u2013${fmt(b)}';
+  }
+
+  final countWord = switch (setTypeCode) {
+    'time' => 's',
+    'distance' => ' steps',
+    _ => ' reps',
+  };
+
+  final parts = <String>[];
+
+  final w = span(
+    weightMinKg == null ? null : fromKg(weightMinKg, unit),
+    weightMaxKg == null ? null : fromKg(weightMaxKg, unit),
+    (v) => num2(v.toDouble()),
+  );
+  if (w != null) parts.add('$w $unit');
+
+  final reps = span(repsMin, repsMax, (v) => '${v.toInt()}');
+  if (reps != null) parts.add('$reps$countWord');
+
+  final rpe = span(rpeMin, rpeMax, (v) => num2(v.toDouble()));
+  if (rpe != null) parts.add('RPE $rpe');
+
+  if (parts.isEmpty) return null;
+  return 'Target ${parts.join(', ')}';
+}
+
 /// The categories you add weights under on the Equipment page. Each one maps
 /// to the Garmin equipment codes it can satisfy, so the weight quick-pick
 /// chips know which of your weights are relevant to the exercise in front of
