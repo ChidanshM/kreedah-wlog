@@ -181,11 +181,11 @@ screen.
 ### Adding a session that already happened
 
 Two ways in: **Train → ··· on a routine → Log a past session**, or
-**History → + Past session**, which asks which routine first.
+**Logbook → + Past session**, which asks which routine first.
 
 Then it asks when. The **date** is all that is required. Add a **start time**
 if you remember it, and an **end time** only after that. A session with no
-time recorded says exactly that in the history rather than pretending it
+time recorded says exactly that in the logbook rather than pretending it
 began at midnight.
 
 The sets arrive already filled in and already confirmed, because filling in
@@ -198,7 +198,7 @@ old numbers, which is the only thing that makes sense.
 
 ### Fixing a session already logged
 
-**History → tap a session → the pencil.** It opens exactly like a live
+**Logbook → tap a session → the pencil.** It opens exactly like a live
 session: change any weight, rep count or RPE, drag exercises into a different
 order, add or remove them, edit the note.
 
@@ -209,14 +209,22 @@ Anything you added but never confirmed is dropped, same as finishing.
 
 ---
 
-## History
+## Logbook
 
 Every finished session, newest first, with its date and total volume. The
 strip at the bottom shows session count and all-time tonnage.
 
+The filter icon narrows it: a span of dates, a set of routines, or both. With
+a filter on, the strip counts the selection rather than everything.
+
 Tap one for the detail: start and finish time, volume, set count, total reps,
 heaviest lift, then every exercise and set with its RPE and per-set volume.
-The pencil opens it for editing, the bin deletes it.
+The pencil opens it for editing, the bin deletes it, and the rename icon
+changes its name.
+
+Renaming changes the label only. The session still counts as the routine it
+followed, so it keeps feeding the pre-filled numbers and still appears when
+you filter by that routine.
 
 **+ Past session** adds one you did but never recorded.
 

@@ -46,6 +46,38 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
     });
   }
 
+  /// Rename the session without unlinking it. The label changes; the routine
+  /// it followed does not, so it still counts for pre-filling and filtering.
+  Future<void> _rename() async {
+    final controller = TextEditingController(
+        text: _workout?['routine_name'] as String? ?? '');
+    final name = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Rename session'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(labelText: 'Name'),
+          onSubmitted: (v) => Navigator.pop(c, v.trim()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty) return;
+    await Db.setWorkoutName(widget.workoutId, name);
+    notifyDataChanged();
+    await _load();
+  }
+
   Future<void> _delete() async {
     final ok = await showDialog<bool>(
       context: context,
@@ -79,6 +111,11 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
       appBar: AppBar(
         title: Text(_workout?['routine_name'] as String? ?? 'Session'),
         actions: [
+          IconButton(
+            tooltip: 'Rename',
+            icon: const Icon(Icons.drive_file_rename_outline),
+            onPressed: _rename,
+          ),
           IconButton(
             tooltip: 'Edit this session',
             icon: const Icon(Icons.edit_outlined),

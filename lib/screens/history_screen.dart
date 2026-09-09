@@ -8,6 +8,8 @@ import 'session_time_sheet.dart';
 import 'workout_detail_screen.dart';
 import 'workout_screen.dart';
 
+enum _Span { all, days30, days90, year, custom }
+
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
 
@@ -17,8 +19,16 @@ class HistoryScreen extends StatefulWidget {
 
 class _HistoryScreenState extends State<HistoryScreen> {
   List<Map<String, dynamic>> _workouts = const [];
+  List<Map<String, dynamic>> _routines = const [];
   final _volumes = <int, double>{};
   bool _loading = true;
+
+  _Span _span = _Span.all;
+  DateTime? _from;
+  DateTime? _to;
+  final _routineIds = <int>{};
+
+  bool get _filtered => _span != _Span.all || _routineIds.isNotEmpty;
 
   @override
   void initState() {
@@ -39,26 +49,172 @@ class _HistoryScreenState extends State<HistoryScreen> {
     _load();
   }
 
+  ({DateTime? from, DateTime? to}) _range() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    switch (_span) {
+      case _Span.all:
+        return (from: null, to: null);
+      case _Span.days30:
+        return (from: today.subtract(const Duration(days: 30)), to: null);
+      case _Span.days90:
+        return (from: today.subtract(const Duration(days: 90)), to: null);
+      case _Span.year:
+        return (from: DateTime(now.year), to: null);
+      case _Span.custom:
+        // Inclusive of the end date, so the boundary is the following day.
+        return (
+          from: _from,
+          to: _to == null ? null : DateTime(_to!.year, _to!.month, _to!.day + 1),
+        );
+    }
+  }
+
   Future<void> _load() async {
-    final workouts = await Db.workoutHistory();
+    final r = _range();
+    final routines = await Db.routines();
+    final workouts = await Db.workoutHistory(
+      fromIso: r.from == null ? null : isoLocal(r.from!),
+      toIso: r.to == null ? null : isoLocal(r.to!),
+      routineIds: _routineIds.isEmpty ? null : _routineIds.toList(),
+    );
     final volumes = <int, double>{};
     for (final w in workouts) {
       volumes[w['id'] as int] = await Db.workoutVolume(w['id'] as int);
     }
     if (!mounted) return;
     setState(() {
+      _routines = routines;
       _workouts = workouts;
-      _volumes.clear();
-      _volumes.addAll(volumes);
+      _volumes
+        ..clear()
+        ..addAll(volumes);
       _loading = false;
     });
   }
 
-  /// Add a session that already happened, starting from the routine list.
+  // ------------------------------------------------------------------ filter
+
+  Future<void> _openFilters() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setSheet) => Padding(
+          padding: EdgeInsets.fromLTRB(
+              Bv.s4, Bv.s4, Bv.s4, MediaQuery.of(c).viewInsets.bottom + Bv.s4),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Show', style: BvType.headlineSm),
+                const SizedBox(height: Bv.s3),
+                Text('WHEN', style: BvType.label),
+                const SizedBox(height: Bv.s2),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    (_Span.all, 'All time'),
+                    (_Span.days30, 'Last 30 days'),
+                    (_Span.days90, 'Last 90 days'),
+                    (_Span.year, 'This year'),
+                    (_Span.custom, 'Between dates'),
+                  ]
+                      .map((o) => ChoiceChip(
+                            label: Text(o.$2),
+                            selected: _span == o.$1,
+                            onSelected: (_) => setSheet(() => _span = o.$1),
+                          ))
+                      .toList(),
+                ),
+                if (_span == _Span.custom) ...[
+                  const SizedBox(height: Bv.s2),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () async {
+                            final d = await _pickDate(c, _from);
+                            if (d != null) setSheet(() => _from = d);
+                          },
+                          child:
+                              Text(_from == null ? 'From' : prettyDate(_from!)),
+                        ),
+                      ),
+                      const SizedBox(width: Bv.s2),
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () async {
+                            final d = await _pickDate(c, _to);
+                            if (d != null) setSheet(() => _to = d);
+                          },
+                          child: Text(_to == null ? 'To' : prettyDate(_to!)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: Bv.s4),
+                Text('ROUTINE', style: BvType.label),
+                const SizedBox(height: Bv.s1),
+                Text(
+                  'None selected shows everything, including sessions logged '
+                  'without a routine.',
+                  style: BvType.bodySm,
+                ),
+                ..._routines.map((r) => CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      value: _routineIds.contains(r['id'] as int),
+                      title: Text(r['name'] as String),
+                      onChanged: (v) => setSheet(() => v == true
+                          ? _routineIds.add(r['id'] as int)
+                          : _routineIds.remove(r['id'] as int)),
+                    )),
+                const SizedBox(height: Bv.s3),
+                Row(
+                  children: [
+                    TextButton(
+                      onPressed: () => setSheet(() {
+                        _span = _Span.all;
+                        _from = null;
+                        _to = null;
+                        _routineIds.clear();
+                      }),
+                      child: const Text('Clear'),
+                    ),
+                    const Spacer(),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(c),
+                      child: const Text('Done'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await _load();
+  }
+
+  Future<DateTime?> _pickDate(BuildContext c, DateTime? initial) {
+    final now = DateTime.now();
+    return showDatePicker(
+      context: c,
+      initialDate: initial ?? now,
+      firstDate: DateTime(now.year - 10),
+      lastDate: now,
+    );
+  }
+
+  // ------------------------------------------------------------ past session
+
   Future<void> _addPast() async {
-    final routines = await Db.routines();
-    if (!mounted) return;
-    if (routines.isEmpty) {
+    if (_routines.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Make a routine first.')),
       );
@@ -75,7 +231,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               padding: EdgeInsets.fromLTRB(Bv.s4, Bv.s4, Bv.s4, Bv.s2),
               child: Text('Which routine did you do?'),
             ),
-            ...routines.map((r) => ListTile(
+            ..._routines.map((r) => ListTile(
                   leading: const Icon(Icons.fitness_center_outlined),
                   title: Text(r['name'] as String),
                   onTap: () => Navigator.pop(c, r),
@@ -115,8 +271,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final total = _volumes.values.fold<double>(0, (a, b) => a + b);
+
     return Scaffold(
-      appBar: AppBar(title: const Text('History')),
+      appBar: AppBar(
+        title: const Text('Logbook'),
+        actions: [
+          IconButton(
+            tooltip: 'Filter',
+            icon: Icon(_filtered ? Icons.filter_alt : Icons.filter_alt_outlined),
+            onPressed: _openFilters,
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _addPast,
         icon: const Icon(Icons.add),
@@ -125,15 +292,21 @@ class _HistoryScreenState extends State<HistoryScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _workouts.isEmpty
-              ? const Center(
+              ? Center(
                   child: Padding(
-                    padding: EdgeInsets.all(32),
-                    child: Text('Nothing logged yet.', textAlign: TextAlign.center),
+                    padding: const EdgeInsets.all(32),
+                    child: Text(
+                      _filtered
+                          ? 'Nothing matches those filters.'
+                          : 'Nothing logged yet.',
+                      textAlign: TextAlign.center,
+                    ),
                   ),
                 )
               : RefreshIndicator(
                   onRefresh: _load,
                   child: ListView.builder(
+                    padding: const EdgeInsets.only(bottom: 96),
                     itemCount: _workouts.length,
                     itemBuilder: (context, i) {
                       final w = _workouts[i];
@@ -144,8 +317,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         child: ListTile(
                           title: Text(w['routine_name'] as String),
                           subtitle: Text(started == null
-                              ? '${num2(vol)} kg'
-                              : '${prettyDate(started)}, ${hhmm(started)}'),
+                              ? '\u2014'
+                              : (w['time_known'] as int? ?? 1) == 0
+                                  ? prettyDate(started)
+                                  : '${prettyDate(started)}, ${hhmm(started)}'),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -173,8 +348,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               color: theme.colorScheme.secondaryContainer,
               child: Text(
-                '${_workouts.length} sessions, '
-                '${num2(_volumes.values.fold<double>(0, (a, b) => a + b))} kg lifted all time',
+                '${_workouts.length} session${_workouts.length == 1 ? '' : 's'}, '
+                '${num2(total)} kg'
+                '${_filtered ? ' in this selection' : ' lifted all time'}',
                 style: theme.textTheme.bodySmall,
               ),
             ),
