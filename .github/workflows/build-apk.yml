@@ -73,6 +73,9 @@ jobs:
           # it. It is also permanent once published anywhere.
           flutter create --org com.kreedah --project-name workout_log --platforms=android /tmp/app
           rm -rf /tmp/app/lib /tmp/app/test
+          # The generated lint config points at a package this project does
+          # not depend on, which produces a warning on every run.
+          rm -f /tmp/app/analysis_options.yaml
           DIR='${{ steps.src.outputs.dir }}'
           cp -r "$DIR/lib" "$DIR/assets" "$DIR/docs" "$DIR/pubspec.yaml" /tmp/app/
           # Source we do keep for the Android side, copied over the generated

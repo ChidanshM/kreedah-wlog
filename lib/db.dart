@@ -1006,6 +1006,17 @@ class Db {
     return rows.map((e) => Map<String, dynamic>.from(e)).toList();
   }
 
+  /// Column names allowed for a table, read from the live schema.
+  ///
+  /// Restore and routine import both take their column names from the keys
+  /// of a file, and those keys land in the SQL statement itself rather than
+  /// in a bound parameter. Filtering them against the real schema means a
+  /// hand-edited or hostile file cannot smuggle anything through.
+  static Future<Set<String>> _columnsOf(DatabaseExecutor db, String table) async {
+    final info = await db.rawQuery('PRAGMA table_info($table)');
+    return info.map((r) => r['name'] as String).toSet();
+  }
+
   static Future<void> restore(Map<String, dynamic> data) async {
     const tables = [
       'sets',
@@ -1024,8 +1035,16 @@ class Db {
       }
       for (final t in tables.reversed) {
         final rows = (data[t] as List?) ?? const [];
+        if (rows.isEmpty) continue;
+        final allowed = await _columnsOf(txn, t);
         for (final row in rows) {
-          await txn.insert(t, Map<String, dynamic>.from(row as Map),
+          if (row is! Map) continue;
+          final clean = <String, Object?>{};
+          row.forEach((k, v) {
+            if (k is String && allowed.contains(k)) clean[k] = v;
+          });
+          if (clean.isEmpty) continue;
+          await txn.insert(t, clean,
               conflictAlgorithm: ConflictAlgorithm.replace);
         }
       }
