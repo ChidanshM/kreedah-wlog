@@ -124,6 +124,7 @@ jobs:
       # uninstall. Runs on the built artefact rather than patching Gradle,
       # which keeps it independent of Flutter's generated build files.
       - name: Sign with the permanent key
+        id: sign
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
           KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -142,8 +143,12 @@ jobs:
           for f in /tmp/app/build/app/outputs/flutter-apk/*-release.apk; do
             "$APKSIGNER" sign --ks /tmp/wlog.jks --ks-pass env:KS_PASS \
               --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASS "$f"
-            "$APKSIGNER" verify --print-certs "$f" | grep -i "SHA-256" | head -1
           done
+          FP=$("$APKSIGNER" verify --print-certs \
+            /tmp/app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+            | grep -i 'SHA-256 digest' | head -1 | awk '{print $NF}')
+          echo "fingerprint=$FP" >> "$GITHUB_OUTPUT"
+          echo "Signing certificate: $FP"
 
       # Give the files a name that says what they are and which build they
       # came from. app-arm64-v8a-release.apk tells a stranger nothing, and a
@@ -161,14 +166,11 @@ jobs:
           done
           ls -lh /tmp/out
 
-      # A rolling release on a fixed tag, so there is one permanent link that
-      # always points at the current build and can be opened on the phone
-      # without signing in. Actions artifacts need a login and expire.
-      #
-      # Pushes usually carry several commits, so the notes list all of them
-      # rather than only the last. github.event.before is the tip before this
-      # push, and is all zeroes the first time a branch is pushed.
-      - name: Publish latest build
+      # Every build gets its own permanent tag, so nothing is ever destroyed
+      # to make room for the next one. The stable address still works: GitHub
+      # resolves /releases/latest to whichever release is marked latest, which
+      # is a property of the release rather than a tag that has to be moved.
+      - name: Publish the build
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -176,12 +178,23 @@ jobs:
         run: |
           V='${{ steps.src.outputs.version }}'
           BUILD='${{ steps.src.outputs.build }}'
+          SHA='${{ steps.src.outputs.sha }}'
+          TAG="b$BUILD"
+
           if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
             LOG=$(git log -8 --pretty='- %s')
+            RANGE=""
           else
             LOG=$(git log --pretty='- %s' "$BEFORE..${GITHUB_SHA}")
+            RANGE="[Changes since the last build](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${BEFORE}...${GITHUB_SHA})"
           fi
           [ -z "$LOG" ] && LOG='- no new commits'
+
+          SIZES=$(cd /tmp/out && for f in *.apk; do
+            printf '| %s | %s |\n' "$f" "$(du -h "$f" | cut -f1)"
+          done)
+
+          FLUTTER=$(flutter --version | head -1)
 
           cat > /tmp/notes.md <<EOF
           Install **wlog-$V-b$BUILD-arm64-v8a.apk** unless you know your phone needs another architecture.
@@ -192,13 +205,31 @@ jobs:
 
           $LOG
 
-          Built from \`main\` at \`${{ steps.src.outputs.sha }}\`.
+          ### Files
+
+          | File | Size |
+          | --- | --- |
+          $SIZES
+
+          ### Provenance
+
+          | | |
+          | --- | --- |
+          | Version | $V |
+          | Build | $BUILD |
+          | Commit | \`$SHA\` |
+          | Toolchain | $FLUTTER |
+          | Signing certificate | \`${{ steps.sign.outputs.fingerprint }}\` |
+
+          The certificate is the same on every build. A different one means the
+          key changed and this will not install over what you already have.
+
+          $RANGE
           EOF
 
-          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
-          gh release create latest /tmp/out/*.apk \
+          gh release create "$TAG" /tmp/out/*.apk \
             --title "Build $BUILD ($V)" \
-            --prerelease \
+            --latest \
             --notes-file /tmp/notes.md
 
       # A permanent, versioned release when a tag is pushed.
