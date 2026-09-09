@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../db.dart';
 import '../library.dart';
+import '../saf.dart';
+import '../theme.dart';
 import '../util.dart';
+import 'exercise_filter_sheet.dart';
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key});
@@ -13,9 +16,33 @@ class LibraryScreen extends StatefulWidget {
 
 class _LibraryScreenState extends State<LibraryScreen> {
   final _controller = TextEditingController();
-  final _equipment = <String>{};
-  final _muscles = <String>{};
+  ExerciseFilter _filter = emptyExerciseFilter;
+  Set<String> _owned = {};
   String _query = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOwned();
+  }
+
+  /// Everything the Equipment page says you have, expanded into the codes the
+  /// exercise data uses.
+  Future<void> _loadOwned() async {
+    final kinds = await Db.equipmentKindsOwned();
+    final gear = (await Db.setting(gearSettingKey)) ?? '';
+    final owned = <String>{};
+    for (final k in kinds) {
+      owned.addAll(EquipKind.tags[k] ?? const []);
+    }
+    owned.addAll(gear.split(',').where((e) => e.isNotEmpty));
+    if (mounted) setState(() => _owned = owned);
+  }
+
+  Future<void> _openFilters() async {
+    final next = await pickExerciseFilter(context, _filter);
+    if (next != null && mounted) setState(() => _filter = next);
+  }
 
   @override
   void dispose() {
@@ -55,15 +82,23 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Widget build(BuildContext context) {
     final results = ExerciseLibrary.search(
       _query,
-      equipment: _equipment,
-      muscles: _muscles,
+      equipment: _filter.equipment,
+      muscles: _filter.muscles,
+      onlyMyEquipment: _filter.onlyMine,
+      ownedEquipment: _owned,
     );
     final pinnedCount = ExerciseLibrary.pinned.length;
+    final active = filterIsActive(_filter);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Library'),
         actions: [
+          IconButton(
+            tooltip: 'Filter',
+            icon: Icon(active ? Icons.filter_alt : Icons.filter_alt_outlined),
+            onPressed: _openFilters,
+          ),
           IconButton(
             icon: const Icon(Icons.add),
             tooltip: 'Custom exercise',
@@ -93,7 +128,45 @@ class _LibraryScreenState extends State<LibraryScreen> {
               onChanged: (v) => setState(() => _query = v),
             ),
           ),
-          if (_query.isEmpty && pinnedCount > 0)
+          if (active)
+            SizedBox(
+              height: 44,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                children: [
+                  if (_filter.onlyMine)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: InputChip(
+                        label: const Text('My equipment'),
+                        onDeleted: () => setState(() => _filter = (
+                              equipment: _filter.equipment,
+                              muscles: _filter.muscles,
+                              onlyMine: false,
+                            )),
+                      ),
+                    ),
+                  ..._filter.equipment.map((e) => Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: InputChip(
+                          label: Text(pretty(e)),
+                          onDeleted: () =>
+                              setState(() => _filter.equipment.remove(e)),
+                        ),
+                      )),
+                  ..._filter.muscles.map((m) => Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: InputChip(
+                          label: Text(pretty(m)),
+                          onDeleted: () =>
+                              setState(() => _filter.muscles.remove(m)),
+                        ),
+                      )),
+                ],
+              ),
+            ),
+          if (_query.isEmpty && pinnedCount > 0 && !active)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Align(
@@ -103,8 +176,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
               ),
             ),
           Expanded(
-            child: ListView.builder(
-              itemCount: results.length,
+            child: results.isEmpty
+                ? const Center(child: Text('Nothing matches those filters.'))
+                : ListView.builder(
+                    itemCount: results.length,
               itemBuilder: (context, i) {
                 final ex = results[i];
                 final isPinned = ExerciseLibrary.pinned.contains(ex.key);
