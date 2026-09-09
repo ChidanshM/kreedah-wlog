@@ -12,13 +12,18 @@ typedef ExerciseFilter = ({
   Set<String> equipment,
   Set<String> muscles,
   bool onlyMine,
+  bool onlyCustom,
 });
 
-const ExerciseFilter emptyExerciseFilter =
-    (equipment: <String>{}, muscles: <String>{}, onlyMine: false);
+const ExerciseFilter emptyExerciseFilter = (
+  equipment: <String>{},
+  muscles: <String>{},
+  onlyMine: false,
+  onlyCustom: false,
+);
 
 bool filterIsActive(ExerciseFilter f) =>
-    f.equipment.isNotEmpty || f.muscles.isNotEmpty || f.onlyMine;
+    f.equipment.isNotEmpty || f.muscles.isNotEmpty || f.onlyMine || f.onlyCustom;
 
 Future<ExerciseFilter?> pickExerciseFilter(
   BuildContext context,
@@ -28,6 +33,7 @@ Future<ExerciseFilter?> pickExerciseFilter(
   final equipment = {...current.equipment};
   final muscles = {...current.muscles};
   var onlyMine = current.onlyMine;
+  var onlyCustom = current.onlyCustom;
 
   return showModalBottomSheet<ExerciseFilter>(
     context: context,
@@ -54,8 +60,15 @@ Future<ExerciseFilter?> pickExerciseFilter(
                           'Hides anything needing gear not on your Equipment page'),
                       onChanged: (v) => setSheet(() => onlyMine = v),
                     ),
-                    const Divider(),
                   ],
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: onlyCustom,
+                    title: const Text('Only my own exercises'),
+                    subtitle: const Text('The ones you added by hand'),
+                    onChanged: (v) => setSheet(() => onlyCustom = v),
+                  ),
+                  const Divider(),
                   Text('EQUIPMENT', style: BvType.label),
                   const SizedBox(height: Bv.s2),
                   Wrap(
@@ -107,6 +120,7 @@ Future<ExerciseFilter?> pickExerciseFilter(
                         equipment.clear();
                         muscles.clear();
                         onlyMine = false;
+                        onlyCustom = false;
                       }),
                       child: const Text('Clear'),
                     ),
@@ -118,6 +132,7 @@ Future<ExerciseFilter?> pickExerciseFilter(
                           equipment: equipment,
                           muscles: muscles,
                           onlyMine: onlyMine,
+                          onlyCustom: onlyCustom,
                         ),
                       ),
                       child: const Text('Done'),

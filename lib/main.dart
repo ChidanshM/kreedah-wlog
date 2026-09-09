@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'db.dart';
 import 'library.dart';
 import 'theme.dart';
+import 'screens/calendar_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/library_screen.dart';
 import 'screens/routines_screen.dart';
@@ -46,6 +47,7 @@ class _RootShellState extends State<RootShell> {
         index: _index,
         children: const [
           RoutinesScreen(),
+          CalendarScreen(),
           HistoryScreen(),
           LibraryScreen(),
           SettingsScreen(),
@@ -59,6 +61,11 @@ class _RootShellState extends State<RootShell> {
             icon: Icon(Icons.fitness_center_outlined),
             selectedIcon: Icon(Icons.fitness_center),
             label: 'Train',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.calendar_month_outlined),
+            selectedIcon: Icon(Icons.calendar_month),
+            label: 'Calendar',
           ),
           NavigationDestination(
             icon: Icon(Icons.menu_book_outlined),

@@ -104,6 +104,25 @@ class ExerciseLibrary {
     pinned = (await Db.pinnedKeys()).toSet();
   }
 
+  /// How many entries match the filters alone, ignoring any typed text. The
+  /// search field says this rather than the library total, since a filtered
+  /// list of twelve should not claim to hold fifteen hundred.
+  static int countMatching({
+    Set<String> equipment = const {},
+    Set<String> muscles = const {},
+    bool onlyMyEquipment = false,
+    bool onlyCustom = false,
+    Set<String> ownedEquipment = const {},
+  }) =>
+      search('',
+              equipment: equipment,
+              muscles: muscles,
+              onlyMyEquipment: onlyMyEquipment,
+              onlyCustom: onlyCustom,
+              ownedEquipment: ownedEquipment,
+              limit: 1 << 30)
+          .length;
+
   static Exercise? get(String key) => byKey[key];
 
   static String nameOf(String key, [String fallback = '']) =>
@@ -119,6 +138,7 @@ class ExerciseLibrary {
     Set<String> equipment = const {},
     Set<String> muscles = const {},
     bool onlyMyEquipment = false,
+    bool onlyCustom = false,
     Set<String> ownedEquipment = const {},
     int limit = 400,
   }) {
@@ -127,6 +147,7 @@ class ExerciseLibrary {
 
     final results = <Exercise>[];
     for (final e in all) {
+      if (onlyCustom && !e.custom) continue;
       if (equipment.isNotEmpty && !e.equipment.any(equipment.contains)) {
         continue;
       }

@@ -8,6 +8,7 @@ import '../theme.dart';
 import 'equipment_screen.dart';
 import 'export_sheet.dart';
 import 'guide_screen.dart';
+import 'schedule_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -233,6 +234,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: () async {
               await Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const EquipmentScreen()));
+              await _load();
+            },
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.event_repeat_outlined),
+            title: const Text('Scheduling'),
+            subtitle: const Text('Planned days, repeats, and what you kept to'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () async {
+              await Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ScheduleScreen()));
               await _load();
             },
           ),

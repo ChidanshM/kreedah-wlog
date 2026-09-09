@@ -102,6 +102,16 @@ String prettyDate(DateTime d) =>
 String hhmm(DateTime d) =>
     '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
 
+/// ISO-8601 week number: weeks start on Monday, and week one is the one
+/// holding the first Thursday of the year. That definition is why the first
+/// days of January sometimes belong to week 52 or 53 of the year before.
+int isoWeekNumber(DateTime date) {
+  final d = DateTime(date.year, date.month, date.day);
+  final thursday = d.add(Duration(days: 4 - d.weekday));
+  final firstOfYear = DateTime(thursday.year, 1, 1);
+  return 1 + thursday.difference(firstOfYear).inDays ~/ 7;
+}
+
 /// "today" / "yesterday" / "12d ago"
 String agoLabel(DateTime then) {
   final now = DateTime.now();

@@ -35,11 +35,33 @@ class Db {
     'target_weight_max',
   ];
 
+  /// A routine placed on the calendar.
+  ///
+  /// The rule is stored, not the individual days it produces. Occurrences are
+  /// worked out on demand, which keeps a year of training as one row and
+  /// means changing a rule does not leave stale days behind. Nothing needs to
+  /// mark a day as skipped, because missing one is a non-event: the schedule
+  /// says what was planned, the logbook says what happened, and they are
+  /// allowed to disagree.
+  static const _scheduleTable = '''
+    CREATE TABLE schedule(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      routine_id INTEGER NOT NULL REFERENCES routines(id) ON DELETE CASCADE,
+      start_date TEXT NOT NULL,
+      repeat_kind TEXT NOT NULL DEFAULT 'once',
+      repeat_days TEXT NOT NULL DEFAULT '',
+      until_date TEXT,
+      repeat_count INTEGER,
+      paused INTEGER NOT NULL DEFAULT 0,
+      remind_at TEXT,
+      created_at TEXT NOT NULL
+    )''';
+
   static Future<void> init() async {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'workout_log.db'),
-      version: 3,
+      version: 4,
       onConfigure: (d) async {
         await d.execute('PRAGMA foreign_keys = ON');
       },
@@ -60,6 +82,10 @@ class Db {
               await d.execute('ALTER TABLE $t ADD COLUMN $c');
             }
           }
+        }
+        // v4: routines can be placed on the calendar, optionally repeating.
+        if (from < 4) {
+          await d.execute(_scheduleTable);
         }
       },
       onCreate: (d, v) async {
@@ -161,6 +187,7 @@ class Db {
 
         await d.execute('CREATE TABLE pinned(ex_key TEXT PRIMARY KEY)');
         await d.execute('CREATE TABLE settings(k TEXT PRIMARY KEY, v TEXT)');
+        await d.execute(_scheduleTable);
 
         await d.execute(
             'CREATE INDEX idx_we_workout ON workout_exercises(workout_id)');
@@ -410,6 +437,261 @@ class Db {
       added++;
     }
     return added;
+  }
+
+  // --------------------------------------------------------------- schedule
+
+  /// How a placement repeats. Weekly uses weekday numbers in repeat_days
+  /// (Monday is 1); monthly uses days of the month.
+  static const repeatOnce = 'once';
+  static const repeatWeekly = 'weekly';
+  static const repeatMonthly = 'monthly';
+
+  static Future<List<Map<String, dynamic>>> schedules() async =>
+      (await _db.rawQuery('''
+        SELECT s.*, r.name AS routine_name
+        FROM schedule s
+        JOIN routines r ON r.id = s.routine_id
+        ORDER BY s.paused ASC, s.start_date ASC, s.id ASC'''))
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+
+  static Future<int> addSchedule({
+    required int routineId,
+    required DateTime startDate,
+    String repeatKind = repeatOnce,
+    List<int> days = const [],
+    DateTime? until,
+    int? repeatCount,
+    String? remindAt,
+  }) =>
+      _db.insert('schedule', {
+        'routine_id': routineId,
+        'start_date': ymd(startDate),
+        'repeat_kind': repeatKind,
+        'repeat_days': days.join(','),
+        // An ending is either a date or a number of times, never both.
+        'until_date': repeatCount == null && until != null ? ymd(until) : null,
+        'repeat_count': repeatCount,
+        'paused': 0,
+        'remind_at': remindAt,
+        'created_at': isoLocal(DateTime.now()),
+      });
+
+  static Future<void> updateSchedule(int id, Map<String, dynamic> patch) =>
+      _db.update('schedule', patch, where: 'id = ?', whereArgs: [id]);
+
+  static Future<void> deleteSchedule(int id) =>
+      _db.delete('schedule', where: 'id = ?', whereArgs: [id]);
+
+  static Future<void> pauseSchedule(int id, bool paused) => _db.update(
+      'schedule', {'paused': paused ? 1 : 0},
+      where: 'id = ?', whereArgs: [id]);
+
+  /// A rule broken into cycles: a week for a weekly rule, a month for a
+  /// monthly one.
+  ///
+  /// The cycle is the unit a repeat count refers to. Twelve times with Monday
+  /// and Friday chosen means twelve weeks and twenty-four sessions, not
+  /// twelve sessions. It is also the unit adherence is measured in, so a week
+  /// where only one of two days happened counts as half.
+  ///
+  /// The first cycle can hold fewer dates than the rest when the start falls
+  /// mid-week, which is correct: only the days from the start onwards were
+  /// ever asked for, and adherence for that cycle is judged against them.
+  static List<({DateTime start, List<DateTime> dates})> scheduleCycles(
+    Map<String, dynamic> s, {
+    int horizonCycles = 520,
+  }) {
+    final start = DateTime.parse(s['start_date'] as String);
+    final kind = s['repeat_kind'] as String;
+    final count = s['repeat_count'] as int?;
+    final untilRaw = s['until_date'] as String?;
+    final until = untilRaw == null ? null : DateTime.parse(untilRaw);
+    final days = (s['repeat_days'] as String)
+        .split(',')
+        .where((e) => e.isNotEmpty)
+        .map(int.parse)
+        .toList()
+      ..sort();
+
+    final out = <({DateTime start, List<DateTime> dates})>[];
+
+    if (kind == repeatOnce || days.isEmpty) {
+      return [(start: start, dates: [start])];
+    }
+
+    final limit = (count ?? horizonCycles).clamp(1, horizonCycles);
+
+    for (var i = 0; i < limit; i++) {
+      late DateTime cycleStart;
+      final dates = <DateTime>[];
+
+      if (kind == repeatWeekly) {
+        final monday = start.subtract(Duration(days: start.weekday - 1));
+        cycleStart = monday.add(Duration(days: 7 * i));
+        for (final wd in days) {
+          final d = cycleStart.add(Duration(days: wd - 1));
+          if (d.isBefore(start)) continue;
+          if (until != null && d.isAfter(until)) continue;
+          dates.add(d);
+        }
+      } else {
+        cycleStart = DateTime(start.year, start.month + i);
+        final lastDay = DateTime(cycleStart.year, cycleStart.month + 1, 0).day;
+        for (final dayNum in days) {
+          // A day the month does not have is skipped rather than moved.
+          // Rolling the 31st into March would place a session in a month
+          // that was never chosen.
+          if (dayNum > lastDay) continue;
+          final d = DateTime(cycleStart.year, cycleStart.month, dayNum);
+          if (d.isBefore(start)) continue;
+          if (until != null && d.isAfter(until)) continue;
+          dates.add(d);
+        }
+      }
+
+      if (count == null && until != null && cycleStart.isAfter(until)) break;
+      if (dates.isEmpty && count == null && until != null) break;
+      out.add((start: cycleStart, dates: dates));
+    }
+
+    return out;
+  }
+
+  /// Every planned session between two dates, inclusive. Paused placements
+  /// produce nothing.
+  static Future<
+      List<
+          ({
+            DateTime date,
+            int scheduleId,
+            int routineId,
+            String routineName,
+            String? remindAt
+          })>> occurrencesBetween(DateTime from, DateTime to) async {
+    final rows = await schedules();
+    final out = <({
+      DateTime date,
+      int scheduleId,
+      int routineId,
+      String routineName,
+      String? remindAt
+    })>[];
+
+    final a = DateTime(from.year, from.month, from.day);
+    final b = DateTime(to.year, to.month, to.day);
+
+    for (final s in rows) {
+      if ((s['paused'] as int) == 1) continue;
+      for (final c in scheduleCycles(s)) {
+        for (final d in c.dates) {
+          if (d.isBefore(a) || d.isAfter(b)) continue;
+          out.add((
+            date: d,
+            scheduleId: s['id'] as int,
+            routineId: s['routine_id'] as int,
+            routineName: s['routine_name'] as String,
+            remindAt: s['remind_at'] as String?,
+          ));
+        }
+      }
+    }
+
+    out.sort((a, b) => a.date.compareTo(b.date));
+    return out;
+  }
+
+  /// Dates on which this routine was actually trained, as yyyy-mm-dd.
+  /// Backdated sessions count, so filling one in later closes the gap.
+  static Future<Set<String>> trainedDates(int routineId) async {
+    final r = await _db.rawQuery('''
+      SELECT DISTINCT substr(started_at, 1, 10) AS d
+      FROM workouts
+      WHERE routine_id = ? AND ended_at IS NOT NULL''', [routineId]);
+    return r.map((e) => e['d'] as String).toSet();
+  }
+
+  /// How much of a schedule was actually kept.
+  ///
+  /// Each cycle is worth one unit, shared across the days it asked for, so a
+  /// week of Monday and Friday where only Monday happened counts as a half.
+  /// Only cycles whose days have already passed are judged; the rest are
+  /// still ahead and would otherwise drag the figure down.
+  static Future<
+      ({
+        double unitsDone,
+        int cyclesDue,
+        int sessionsDone,
+        int sessionsDue,
+        int? totalCycles,
+      })> scheduleAdherence(Map<String, dynamic> s) async {
+    final cycles = scheduleCycles(s);
+    final trained = await trainedDates(s['routine_id'] as int);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    var units = 0.0;
+    var cyclesDue = 0;
+    var done = 0;
+    var due = 0;
+
+    for (final c in cycles) {
+      final past = c.dates.where((d) => !d.isAfter(today)).toList();
+      if (past.isEmpty) continue;
+      cyclesDue++;
+      final hit = past.where((d) => trained.contains(ymd(d))).length;
+      due += past.length;
+      done += hit;
+      units += hit / past.length;
+    }
+
+    return (
+      unitsDone: units,
+      cyclesDue: cyclesDue,
+      sessionsDone: done,
+      sessionsDue: due,
+      totalCycles: s['repeat_count'] as int?,
+    );
+  }
+
+  /// What is left of a placement: when it next runs, how many cycles remain,
+  /// or the date it stops.
+  static ({DateTime? next, int? cyclesLeft, DateTime? endsOn, int? totalCycles})
+      scheduleStatus(Map<String, dynamic> s) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final untilRaw = s['until_date'] as String?;
+    final cycles = scheduleCycles(s);
+
+    DateTime? next;
+    var cyclesLeft = 0;
+    for (final c in cycles) {
+      final ahead = c.dates.where((d) => !d.isBefore(today)).toList();
+      if (ahead.isEmpty) continue;
+      cyclesLeft++;
+      next ??= ahead.first;
+    }
+
+    return (
+      next: next,
+      cyclesLeft: s['repeat_count'] == null ? null : cyclesLeft,
+      endsOn: untilRaw == null ? null : DateTime.parse(untilRaw),
+      totalCycles: s['repeat_count'] as int?,
+    );
+  }
+
+  /// Whether a session for this routine was logged on that date. Backdated
+  /// entries count, so filling one in later closes the gap.
+  static Future<bool> wasTrained(int routineId, DateTime day) async {
+    final from = ymd(day);
+    final to = ymd(day.add(const Duration(days: 1)));
+    final r = await _db.rawQuery('''
+      SELECT 1 FROM workouts
+      WHERE routine_id = ? AND ended_at IS NOT NULL
+        AND started_at >= ? AND started_at < ?
+      LIMIT 1''', [routineId, from, to]);
+    return r.isNotEmpty;
   }
 
   // ---------------------------------------------------------------- workouts
@@ -1014,6 +1296,55 @@ class Db {
         'e': equipment.join(','),
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// Change a custom exercise in place.
+  ///
+  /// The key never moves, so routines and logged sessions keep pointing at
+  /// the same entry however the name changes. Routines are updated to the new
+  /// name because a plan should say what a thing is called now; logged
+  /// sessions keep the name they were recorded under, because that is what
+  /// the record said at the time.
+  static Future<void> updateCustomExercise(
+    String key, {
+    required String name,
+    List<String> muscles = const [],
+    List<String> equipment = const [],
+  }) async {
+    await _db.update(
+      'custom_exercises',
+      {'n': name, 'p': muscles.join(','), 'e': equipment.join(',')},
+      where: 'k = ?',
+      whereArgs: [key],
+    );
+    await _db.update('routine_exercises', {'ex_name': name},
+        where: 'ex_key = ?', whereArgs: [key]);
+  }
+
+  /// Remove a custom exercise from the library.
+  ///
+  /// Routines and logged sessions keep their own copy of the name, so nothing
+  /// already recorded loses its label. What breaks is the link back to the
+  /// library entry: pinning, filtering and the heaviest-ever figure stop
+  /// finding it.
+  static Future<void> deleteCustomExercise(String key) async {
+    await _db.delete('custom_exercises', where: 'k = ?', whereArgs: [key]);
+    await _db.delete('pinned', where: 'ex_key = ?', whereArgs: [key]);
+  }
+
+  /// How many routines and sessions refer to an exercise, so deleting it can
+  /// say what it would strand.
+  static Future<({int routines, int sessions})> customExerciseUsage(
+      String key) async {
+    final r = await _db.rawQuery(
+        'SELECT COUNT(*) c FROM routine_exercises WHERE ex_key = ?', [key]);
+    final w = await _db.rawQuery(
+        'SELECT COUNT(DISTINCT workout_id) c FROM workout_exercises WHERE ex_key = ?',
+        [key]);
+    return (
+      routines: (r.first['c'] as num).toInt(),
+      sessions: (w.first['c'] as num).toInt(),
     );
   }
 
