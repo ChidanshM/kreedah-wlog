@@ -71,8 +71,13 @@ class Exporter {
     return s;
   }
 
-  static Future<String> buildCsv() async {
-    final rows = await Db.exportRows();
+  static Future<({String csv, int rows})> buildCsv({
+    String? fromIso,
+    String? toIso,
+    List<int>? routineIds,
+  }) async {
+    final rows = await Db.exportRows(
+        fromIso: fromIso, toIso: toIso, routineIds: routineIds);
     final buf = StringBuffer()..writeln(csvHeader.join(','));
 
     for (final r in rows) {
@@ -115,7 +120,7 @@ class Exporter {
       ];
       buf.writeln(line.map(_cell).join(','));
     }
-    return buf.toString();
+    return (csv: buf.toString(), rows: rows.length);
   }
 
   static Future<String> buildJson() async {
@@ -141,38 +146,73 @@ class Exporter {
     return const JsonEncoder.withIndent('  ').convert(data);
   }
 
-  /// Writes both files to wherever the user chose, falling back to the app's
-  /// own folder when no folder has been picked.
+  /// Writes the chosen files to wherever the user picked, falling back to the
+  /// app's own folder when no folder has been chosen.
   ///
-  /// Returns the names written and a description of where they went.
-  static Future<({List<String> names, String where, bool reachable})>
-      exportAll() async {
+  /// Filters narrow the spreadsheet only. The backup is always complete,
+  /// because a partial one would restore quietly and leave gaps with nothing
+  /// to announce them.
+  static Future<({List<String> names, String where, bool reachable, int rows})>
+      exportAll({
+    bool csv = true,
+    bool backup = true,
+    DateTime? from,
+    DateTime? to,
+    List<int>? routineIds,
+  }) async {
     final now = DateTime.now();
     final stamp =
         '${ymd(now)}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}';
-    final csvName = 'workout_sets_$stamp.csv';
+    final narrowed =
+        from != null || to != null || (routineIds?.isNotEmpty ?? false);
+    final csvName =
+        'workout_sets_$stamp${narrowed ? '_selection' : ''}.csv';
     final jsonName = 'backup_$stamp.json';
+
+    final files = <({String name, String mime, String body})>[];
+    var rowCount = 0;
+
+    if (csv) {
+      final built = await buildCsv(
+        fromIso: from == null ? null : isoLocal(from),
+        toIso: to == null ? null : isoLocal(to),
+        routineIds: routineIds,
+      );
+      rowCount = built.rows;
+      files.add((name: csvName, mime: 'text/csv', body: built.csv));
+    }
+    if (backup) {
+      files.add((
+        name: jsonName,
+        mime: 'application/json',
+        body: await buildJson()
+      ));
+    }
 
     final tree = await Db.setting(exportTreeKey);
     if (await Saf.hasAccess(tree)) {
-      await Saf.writeFile(
-          tree: tree!, name: csvName, mime: 'text/csv', content: await buildCsv());
-      await Saf.writeFile(
-          tree: tree,
-          name: jsonName,
-          mime: 'application/json',
-          content: await buildJson());
+      for (final f in files) {
+        await Saf.writeFile(
+            tree: tree!, name: f.name, mime: f.mime, content: f.body);
+      }
       return (
-        names: [csvName, jsonName],
-        where: await Saf.folderName(tree),
+        names: files.map((f) => f.name).toList(),
+        where: await Saf.folderName(tree!),
         reachable: true,
+        rows: rowCount,
       );
     }
 
     final dir = await exportDir();
-    await File('${dir.path}/$csvName').writeAsString(await buildCsv());
-    await File('${dir.path}/$jsonName').writeAsString(await buildJson());
-    return (names: [csvName, jsonName], where: dir.path, reachable: false);
+    for (final f in files) {
+      await File('${dir.path}/${f.name}').writeAsString(f.body);
+    }
+    return (
+      names: files.map((f) => f.name).toList(),
+      where: dir.path,
+      reachable: false,
+      rows: rowCount,
+    );
   }
 
   /// Backups available to restore from, newest first.

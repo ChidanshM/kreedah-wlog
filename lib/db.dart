@@ -1052,7 +1052,32 @@ class Db {
   }
 
   /// Every confirmed set, flattened, for the CSV export.
-  static Future<List<Map<String, dynamic>>> exportRows() async {
+  ///
+  /// The optional bounds narrow it to a span of dates or a set of routines.
+  /// Sessions logged without a routine fall outside a routine filter, since
+  /// they belong to none of the chosen ones.
+  static Future<List<Map<String, dynamic>>> exportRows({
+    String? fromIso,
+    String? toIso,
+    List<int>? routineIds,
+  }) async {
+    final where = <String>['s.done = 1', 'w.ended_at IS NOT NULL'];
+    final args = <Object?>[];
+
+    if (fromIso != null) {
+      where.add('w.started_at >= ?');
+      args.add(fromIso);
+    }
+    if (toIso != null) {
+      where.add('w.started_at < ?');
+      args.add(toIso);
+    }
+    if (routineIds != null && routineIds.isNotEmpty) {
+      final marks = List.filled(routineIds.length, '?').join(', ');
+      where.add('w.routine_id IN ($marks)');
+      args.addAll(routineIds);
+    }
+
     return (await _db.rawQuery('''
       SELECT
         w.id            AS workout_id,
@@ -1079,9 +1104,9 @@ class Db {
       FROM sets s
       JOIN workout_exercises we ON s.we_id = we.id
       JOIN workouts w ON we.workout_id = w.id
-      WHERE s.done = 1 AND w.ended_at IS NOT NULL
+      WHERE ${where.join(' AND ')}
       ORDER BY w.started_at ASC, we.position ASC, s.set_number ASC, s.side DESC
-    '''))
+    ''', args))
         .map((e) => Map<String, dynamic>.from(e))
         .toList();
   }

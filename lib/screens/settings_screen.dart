@@ -6,6 +6,7 @@ import '../library.dart';
 import '../saf.dart';
 import '../theme.dart';
 import 'equipment_screen.dart';
+import 'export_sheet.dart';
 import 'guide_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -77,9 +78,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _export() async {
+    final opts = await pickExportOptions(context);
+    if (opts == null || !mounted) return;
+
     setState(() => _busy = true);
     try {
-      final r = await Exporter.exportAll();
+      final r = await Exporter.exportAll(
+        csv: opts.csv,
+        backup: opts.backup,
+        from: opts.from,
+        to: opts.to,
+        routineIds: opts.routineIds,
+      );
       if (!mounted) return;
       showDialog(
         context: context,
@@ -93,6 +103,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Text(n, style: BvType.bodySm),
                   )),
+              if (opts.csv) ...[
+                const SizedBox(height: Bv.s2),
+                Text(
+                  r.rows == 0
+                      ? 'No sets matched that selection.'
+                      : '${r.rows} sets in the spreadsheet.',
+                  style: BvType.bodySm.copyWith(
+                      color: r.rows == 0 ? Bv.error : Bv.textSecondary),
+                ),
+              ],
               const SizedBox(height: Bv.s3),
               Text(
                 r.reachable
@@ -241,7 +261,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ListTile(
             leading: const Icon(Icons.ios_share),
             title: const Text('Export'),
-            subtitle: const Text('CSV of every set, plus a JSON backup'),
+            subtitle: const Text('Choose what to include and over what dates'),
             trailing: _busy
                 ? const SizedBox(
                     width: 20, height: 20, child: CircularProgressIndicator())
