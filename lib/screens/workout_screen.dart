@@ -747,9 +747,14 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     );
   }
 
+  /// When the entry unit is pounds the canonical kilograms are shown
+  /// alongside, since every summary figure in the app is in kilograms and
+  /// this is the one place the two can be compared.
   Widget _weightCell(_ExerciseVM vm, Map<String, dynamic> r, bool done) {
     final w = (r['weight_entered'] as num?)?.toDouble();
+    final kg = (r['weight_kg'] as num?)?.toDouble();
     final side = r['side'] as String;
+    final showKg = vm.unit == 'lb' && w != null && kg != null;
     return Row(
       children: [
         if (side != 'both')
@@ -764,6 +769,11 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                 : done
                     ? BvType.metric
                     : BvType.metricPending),
+        if (showKg)
+          Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Text('(${num2(kg)} kg)', style: BvType.unit),
+          ),
       ],
     );
   }
