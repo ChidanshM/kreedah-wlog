@@ -5,7 +5,7 @@ import 'library.dart';
 import 'theme.dart';
 import 'screens/calendar_screen.dart';
 import 'screens/history_screen.dart';
-import 'screens/library_screen.dart';
+import 'screens/home_screen.dart';
 import 'screens/routines_screen.dart';
 import 'screens/settings_screen.dart';
 
@@ -38,7 +38,9 @@ class RootShell extends StatefulWidget {
 }
 
 class _RootShellState extends State<RootShell> {
-  int _index = 0;
+  /// Opens on Home, which is the middle tab: the landing screen should be
+  /// what greets you, and centre is the easiest reach on a phone.
+  int _index = 2;
 
   @override
   Widget build(BuildContext context) {
@@ -48,8 +50,8 @@ class _RootShellState extends State<RootShell> {
         children: const [
           RoutinesScreen(),
           CalendarScreen(),
+          HomeScreen(),
           HistoryScreen(),
-          LibraryScreen(),
           SettingsScreen(),
         ],
       ),
@@ -68,14 +70,14 @@ class _RootShellState extends State<RootShell> {
             label: 'Calendar',
           ),
           NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home),
+            label: 'Home',
+          ),
+          NavigationDestination(
             icon: Icon(Icons.menu_book_outlined),
             selectedIcon: Icon(Icons.menu_book),
             label: 'Logbook',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.search_outlined),
-            selectedIcon: Icon(Icons.search),
-            label: 'Library',
           ),
           NavigationDestination(
             icon: Icon(Icons.settings_outlined),

@@ -8,6 +8,7 @@ import '../theme.dart';
 import 'equipment_screen.dart';
 import 'export_sheet.dart';
 import 'guide_screen.dart';
+import 'library_screen.dart';
 import 'schedule_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -224,6 +225,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const GuideScreen())),
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.search),
+            title: const Text('Exercise library'),
+            subtitle: const Text('Search, filter, pin, add your own'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () async {
+              await Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const LibraryScreen()));
+              await _load();
+            },
           ),
           const Divider(),
           ListTile(
