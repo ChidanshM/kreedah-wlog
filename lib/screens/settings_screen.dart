@@ -112,6 +112,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
         to: opts.to,
         routineIds: opts.routineIds,
       );
+
+      // Session files are written separately: there is one per session
+      // rather than one per export, so they are counted, not named.
+      var sessionCount = 0;
+      if (opts.sessions) {
+        final s = await Exporter.exportSessions(
+          from: opts.from,
+          to: opts.to,
+          routineIds: opts.routineIds,
+        );
+        sessionCount = s.files;
+      }
       if (!mounted) return;
       showDialog(
         context: context,
@@ -125,6 +137,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Text(n, style: BvType.bodySm),
                   )),
+              if (sessionCount > 0)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                      '$sessionCount session file'
+                      '${sessionCount == 1 ? '' : 's'}',
+                      style: BvType.bodySm),
+                ),
               if (opts.csv) ...[
                 const SizedBox(height: Bv.s2),
                 Text(

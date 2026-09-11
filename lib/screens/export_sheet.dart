@@ -12,6 +12,7 @@ import '../util.dart';
 typedef ExportOptions = ({
   bool csv,
   bool backup,
+  bool sessions,
   DateTime? from,
   DateTime? to,
   List<int>? routineIds,
@@ -37,6 +38,7 @@ class _ExportSheet extends StatefulWidget {
 class _ExportSheetState extends State<_ExportSheet> {
   bool _csv = true;
   bool _backup = true;
+  bool _sessions = false;
   _Span _span = _Span.all;
   DateTime? _from;
   DateTime? _to;
@@ -91,6 +93,7 @@ class _ExportSheetState extends State<_ExportSheet> {
   @override
   Widget build(BuildContext context) {
     final filtered = _span != _Span.all || !_allRoutines;
+    final narrowable = _csv || _sessions;
 
     return Padding(
       padding: EdgeInsets.fromLTRB(
@@ -113,6 +116,14 @@ class _ExportSheetState extends State<_ExportSheet> {
             ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
+              value: _sessions,
+              onChanged: (v) => setState(() => _sessions = v),
+              title: const Text('One file per session'),
+              subtitle: const Text(
+                  'For merging with watch data. Follows the same span below.'),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
               value: _backup,
               onChanged: (v) => setState(() => _backup = v),
               title: const Text('Backup'),
@@ -120,7 +131,7 @@ class _ExportSheetState extends State<_ExportSheet> {
             ),
 
             const Divider(height: Bv.s5),
-            Text('SPREADSHEET COVERS', style: BvType.label),
+            Text('SPREADSHEET AND SESSION FILES COVER', style: BvType.label),
             const SizedBox(height: Bv.s2),
             Wrap(
               spacing: 6,
@@ -135,7 +146,7 @@ class _ExportSheetState extends State<_ExportSheet> {
                   .map((o) => ChoiceChip(
                         label: Text(o.$2),
                         selected: _span == o.$1,
-                        onSelected: _csv ? (_) => setState(() => _span = o.$1) : null,
+                        onSelected: narrowable ? (_) => setState(() => _span = o.$1) : null,
                       ))
                   .toList(),
             ),
@@ -164,7 +175,7 @@ class _ExportSheetState extends State<_ExportSheet> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               value: _allRoutines,
-              onChanged: _csv ? (v) => setState(() => _allRoutines = v) : null,
+              onChanged: narrowable ? (v) => setState(() => _allRoutines = v) : null,
               title: const Text('All routines'),
               subtitle: const Text('Off to pick which ones'),
             ),
@@ -197,16 +208,18 @@ class _ExportSheetState extends State<_ExportSheet> {
                 ),
                 const Spacer(),
                 FilledButton(
-                  onPressed: (!_csv && !_backup)
+                  onPressed: (!_csv && !_backup && !_sessions)
                       ? null
                       : () {
                           final r = _range();
+                          final narrow = _csv || _sessions;
                           Navigator.pop(context, (
                             csv: _csv,
                             backup: _backup,
-                            from: _csv ? r.from : null,
-                            to: _csv ? r.to : null,
-                            routineIds: _csv && !_allRoutines
+                            sessions: _sessions,
+                            from: narrow ? r.from : null,
+                            to: narrow ? r.to : null,
+                            routineIds: narrow && !_allRoutines
                                 ? _chosen.toList()
                                 : null,
                           ));
