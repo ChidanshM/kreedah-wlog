@@ -46,6 +46,10 @@ class MainActivity : FlutterActivity() {
                 "hasAccess" -> result.success(hasAccess(call.argument<String>("tree")))
                 "appVersion" -> result.success(appVersion())
                 "openUrl" -> openUrl(call.argument<String>("url")!!, result)
+                "keepAwake" -> {
+                    keepAwake(call.argument<Boolean>("on") ?: false)
+                    result.success(true)
+                }
                 else -> result.notImplemented()
             }
         } catch (e: Exception) {
@@ -154,6 +158,23 @@ class MainActivity : FlutterActivity() {
             ?.use { it.readBytes().toString(Charsets.UTF_8) }
             ?: throw IllegalStateException("Could not read that file")
         result.success(text)
+    }
+
+    /**
+     * Holds the screen on while a stopwatch is running.
+     *
+     * A window flag rather than a wake lock: it needs no permission, and it
+     * releases itself if the app is backgrounded or killed, so a forgotten
+     * timer cannot hold the screen on indefinitely.
+     */
+    private fun keepAwake(on: Boolean) {
+        runOnUiThread {
+            if (on) {
+                window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            } else {
+                window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        }
     }
 
     /** The trailing part of the tree id, which is what a person recognises. */

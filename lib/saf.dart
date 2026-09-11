@@ -87,4 +87,9 @@ class Native {
   /// makes no requests of its own; the browser does the fetching.
   static Future<bool> openUrl(String url) async =>
       await _channel.invokeMethod<bool>('openUrl', {'url': url}) ?? false;
+
+  /// Holds the screen on. Used while a stopwatch is running, since a track
+  /// session is unusable if the screen sleeps between reps.
+  static Future<void> keepAwake(bool on) =>
+      _channel.invokeMethod<bool>('keepAwake', {'on': on});
 }

@@ -5,9 +5,9 @@ import '../db.dart';
 import '../theme.dart';
 import '../util.dart';
 import 'equipment_screen.dart';
-import 'guide_screen.dart';
 import 'library_screen.dart';
 import 'schedule_screen.dart';
+import 'track_screen.dart';
 import 'workout_detail_screen.dart';
 import 'workout_screen.dart';
 
@@ -27,6 +27,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? _open;
   List<({DateTime date, int scheduleId, int routineId, String routineName, String? remindAt})>
       _today = const [];
+  List<({DateTime date, int scheduleId, int routineId, String routineName, String? remindAt})>
+      _ahead = const [];
   List<Map<String, dynamic>> _recent = const [];
   final _volumes = <int, double>{};
   bool _loading = true;
@@ -52,6 +54,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final open = await Db.openWorkout();
     final planned = await Db.occurrencesBetween(today, today);
+    // Tomorrow through the day after next: enough to know whether to train
+    // tonight or rest, without turning this into a second calendar.
+    final ahead = await Db.occurrencesBetween(
+      today.add(const Duration(days: 1)),
+      today.add(const Duration(days: 3)),
+    );
     final recent = await Db.workoutHistory(limit: 3);
     final volumes = <int, double>{};
     for (final w in recent) {
@@ -62,6 +70,7 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _open = open;
       _today = planned;
+      _ahead = ahead;
       _recent = recent;
       _volumes
         ..clear()
@@ -126,6 +135,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   _recentSection(),
                   const Divider(height: Bv.s5),
                   _links(),
+                  const Divider(height: Bv.s5),
+                  _aheadSection(),
                 ],
               ),
             ),
@@ -240,12 +251,83 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// The next three days, one line each.
+  ///
+  /// A summary rather than a second calendar: enough to know whether
+  /// tomorrow is a training day, with the calendar tab a tap away for
+  /// anything more.
+  Widget _aheadSection() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(Bv.s4, Bv.s3, Bv.s4, Bv.s2),
+          child: Text('NEXT THREE DAYS', style: BvType.label),
+        ),
+        for (var i = 1; i <= 3; i++) _aheadRow(today.add(Duration(days: i))),
+        const SizedBox(height: Bv.s3),
+      ],
+    );
+  }
+
+  Widget _aheadRow(DateTime day) {
+    final on = _ahead
+        .where((p) =>
+            p.date.year == day.year &&
+            p.date.month == day.month &&
+            p.date.day == day.day)
+        .map((p) => p.routineName)
+        .toList();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Bv.s4, 0, Bv.s4, Bv.s2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 96,
+            child: Text(
+              '${weekdayShort(day)} ${day.day} ${_monthShort(day)}',
+              style: BvType.bodySm,
+            ),
+          ),
+          Expanded(
+            child: on.isEmpty
+                ? Text('Rest', style: BvType.bodySm.copyWith(color: Bv.sand500))
+                : Text(
+                    on.join(', '),
+                    style: BvType.bodySm.copyWith(color: Bv.forest700),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _monthShort(DateTime d) {
+    const m = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    return m[d.month - 1];
+  }
+
   /// Everything that is not a tab. The library lives here now rather than in
   /// the bar, since it is something you go to occasionally rather than a
   /// place you work from.
   Widget _links() {
     return Column(
       children: [
+        ListTile(
+          leading: const Icon(Icons.timer_outlined),
+          title: const Text('Track session'),
+          subtitle: const Text('Stopwatch for intervals'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => _open_(const TrackScreen()),
+        ),
         ListTile(
           leading: const Icon(Icons.search),
           title: const Text('Exercise library'),
@@ -266,12 +348,6 @@ class _HomeScreenState extends State<HomeScreen> {
           subtitle: const Text('Your weights and gear'),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => _open_(const EquipmentScreen()),
-        ),
-        ListTile(
-          leading: const Icon(Icons.menu_book_outlined),
-          title: const Text('User guide'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => _open_(const GuideScreen()),
         ),
       ],
     );

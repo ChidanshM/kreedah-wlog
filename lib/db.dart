@@ -78,7 +78,7 @@ class Db {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'workout_log.db'),
-      version: 5,
+      version: 6,
       onConfigure: (d) async {
         await d.execute('PRAGMA foreign_keys = ON');
       },
@@ -114,6 +114,11 @@ class Db {
           await d.execute(
               'ALTER TABLE routine_exercises ADD COLUMN rest_sec INTEGER');
           await d.execute('ALTER TABLE sets ADD COLUMN rest_sec INTEGER');
+        }
+        // v6: a rep on the track is a distance in metres, which the step
+        // count built for carries cannot express.
+        if (from < 6) {
+          await d.execute('ALTER TABLE sets ADD COLUMN distance_m REAL');
         }
       },
       onCreate: (d, v) async {
@@ -192,6 +197,7 @@ class Db {
             distance_steps INTEGER,
             rpe REAL,
             volume_kg REAL NOT NULL DEFAULT 0,
+            distance_m REAL,
             done INTEGER NOT NULL DEFAULT 0,
             ts TEXT
           )''');
@@ -770,6 +776,55 @@ class Db {
         AND started_at >= ? AND started_at < ?
       LIMIT 1''', [routineId, from, to]);
     return r.isNotEmpty;
+  }
+
+  /// Store a finished track session: one exercise, one set per rep.
+  ///
+  /// Kept on the same tables as everything else rather than a parallel
+  /// structure, so it appears in the logbook, the calendar and the export
+  /// without any of them needing to know it came from a stopwatch.
+  static Future<int> saveTrackSession({
+    required List<({int seconds, int metres})> laps,
+    required DateTime start,
+    DateTime? end,
+    String name = 'Track session',
+  }) async {
+    final workoutId = await _db.insert('workouts', {
+      'routine_id': null,
+      'routine_name': name,
+      'started_at': isoLocal(start),
+      'ended_at': isoLocal(end ?? DateTime.now()),
+      'time_known': 1,
+      'notes': '',
+    });
+
+    final weId = await _db.insert('workout_exercises', {
+      'workout_id': workoutId,
+      'ex_key': 'CUSTOM/TRACK_INTERVAL',
+      'ex_name': 'Track interval',
+      'position': 0,
+      'set_type': SetType.time,
+      'unilateral': 0,
+      'unit': 'kg',
+      'notes': '',
+    });
+
+    final batch = _db.batch();
+    for (var i = 0; i < laps.length; i++) {
+      batch.insert('sets', {
+        'we_id': weId,
+        'set_number': i + 1,
+        'side': 'both',
+        'entry_unit': 'kg',
+        'duration_sec': laps[i].seconds,
+        'distance_m': laps[i].metres.toDouble(),
+        'volume_kg': 0,
+        'done': 1,
+        'ts': isoLocal(start.add(Duration(seconds: laps[i].seconds * i))),
+      });
+    }
+    await batch.commit(noResult: true);
+    return workoutId;
   }
 
   // ---------------------------------------------------------------- workouts
