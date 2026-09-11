@@ -6,10 +6,31 @@ and this document is a stopgap, not a substitute for fixing it.
 
 ---
 
+## Getting around
+
+Five tabs along the bottom.
+
+**Train** — your routines, and where a session starts.
+**Calendar** — planned days against logged ones.
+**Home** — the middle tab, and where the app opens. What is happening now.
+**Logbook** — every finished session.
+**More** — equipment, library, scheduling, export, settings, this guide.
+
+**Home** answers "what do I do next" rather than showing statistics. A
+session left running sits at the top, since forgetting one is the failure
+that costs you data. Then what the schedule asks for today, with a Start
+button, or a tick if it is already done. Then your last few sessions, then
+the way in to the stopwatch, the library, scheduling and equipment, and
+finally the next three days — one line each, naming what is planned or
+saying the day is a rest.
+
+---
+
 ## Equipment first
 
 **More → Equipment.** Do this first. It is the single thing that makes
 logging fast, and until it is filled in the app feels worse than it is.
+(Also reachable from Home.)
 
 Every weight you add here becomes a one-tap chip while logging. Tap **Weights**
 and you get four boxes:
@@ -35,8 +56,7 @@ uses equipment you have not added, you get no chips and type the number
 instead — that is working correctly, not a bug.
 
 **Other gear** lower down is a set of toggles for things without a weight:
-bench, pull-up bar, bands, box. These feed the "only what I can do" filter
-when searching exercises.
+bench, pull-up bar, bands, box.
 
 ---
 
@@ -69,6 +89,21 @@ exercise name — anything called "single-arm" or "alternating" defaults to on
 
 **Sets** — how many appear pre-filled when you start. Change it mid-session
 freely; this is a starting point, not a commitment.
+
+**Rest** — seconds to count down after each set is logged. Leave it empty for
+no timer.
+
+### When one set differs from the others
+
+**Different values per set** turns the single target above into a table, one
+row per set, with its own count, weight, RPE and rest.
+
+Anything left blank falls back to the target above, so a drop set means
+filling in one row rather than four. Turning the switch back off deletes
+those rows rather than hiding them, so nothing reappears unexpectedly later.
+
+What you actually lifted last time still takes precedence over both. A target
+is an intention; history is evidence.
 
 Drag the handle at the right of each row to reorder. Long-press and drag.
 
@@ -107,6 +142,14 @@ a pale number has not happened yet.
 - Numbers wrong → tap anywhere on the row to open the editor.
 - Logged something by mistake → tap the green tick to undo it.
 
+If the exercise is set to pounds, the kilogram figure appears beside it in
+brackets. Every summary in the app is in kilograms, and this is the one place
+the two can be compared directly.
+
+Where the routine asked for a rest, logging a set starts a countdown banner
+at the top with a **Skip** button, and buzzes when it ends. It never blocks
+anything — you can keep logging straight through it.
+
 ### The set editor
 
 Opens when you tap a row.
@@ -129,6 +172,9 @@ with its own weight, count and RPE. The rotating counter and the RPE chips
 both act on whichever side you last tapped — the labels read `REPS R` and
 `RPE R` so you can see which. Each side's current rating stays visible beside
 its name, so you can tell them apart without switching back and forth.
+
+That asymmetry is the whole reason for logging sides apart. Same load, harder
+on one side, is exactly the signal worth watching over weeks.
 
 ### When the equipment is busy
 
@@ -168,8 +214,9 @@ planned.
 
 **··· → Discard session** deletes the whole thing.
 
-Close the app mid-session and nothing is lost. Reopening shows a banner on
-the Train screen to continue where you left off.
+Close the app mid-session and nothing is lost. Reopening shows it at the top
+of Home, and a banner on the Train screen, either of which continues where
+you left off.
 
 ---
 
@@ -209,6 +256,71 @@ Anything you added but never confirmed is dropped, same as finishing.
 
 ---
 
+## Calendar
+
+A month or a week at a time, showing what was planned against what actually
+happened.
+
+The bar across the top: the **calendar icon** jumps to any month or year, the
+**left switch** moves between month and week, **Today** returns you to now,
+and the **right switch** chooses how the calendar moves.
+
+*Flow* scrolls continuously — down the screen held upright, across it turned
+sideways. *Page* shows one period at a time; drag left-to-right or
+top-to-bottom to go back, the other way to go forward.
+
+Each day carries up to two dots. **Green** means something was planned,
+**lavender** means something was logged. A day where everything planned
+actually happened fills green; a planned day gone by without one gets a sand
+outline. Today keeps a dark border.
+
+The two marks are separate on purpose: a session done off plan still shows,
+so the calendar records what you did rather than only what you were told to.
+
+Tap a day to see what was planned and what happened. A planned day that has
+not been done offers **Start** if it is today, or **Log it** if it has
+passed, which fills it in backdated with no time of day.
+
+Week numbers run down the left in the international convention, which is why
+early January sometimes belongs to the previous year. In week view the first
+of a month names itself, since the cells otherwise show bare numbers.
+
+---
+
+## Scheduling
+
+**More → Scheduling.** Place a routine on a date and let it repeat.
+
+**Repeats** — once, weekly on chosen weekdays, or monthly on chosen dates. A
+date a month does not have is skipped rather than moved, so the 31st simply
+does not happen in February.
+
+**Until** — you pause it, a date, or a number of cycles.
+
+A cycle is the unit throughout. Twelve times with Monday and Friday chosen
+means twelve **weeks** and twenty-four sessions, not twelve sessions. The
+sheet shows both figures as you set it.
+
+Each entry shows when it next runs, how much is left, and how much you kept
+to — something like *Next Wed 11 Sep, 9 of 12 left, 2.5 of 3 kept*.
+
+That last figure divides each cycle's single unit across the days it asked
+for, so a week wanting Monday and Friday where only Monday happened counts as
+a half. Only cycles that have already come due are judged; weeks still ahead
+would otherwise drag the number down while it matters most.
+
+Whether a day was kept is read from what you logged, not recorded separately.
+Filling in a missed session later closes the gap by itself.
+
+**Pause** stops a placement producing days without losing its record.
+**Cancel** removes the plan; sessions already logged are kept.
+
+Missing a day does nothing. Nothing marks it, nothing chases you. The
+schedule says what was planned, the logbook says what happened, and they are
+allowed to disagree.
+
+---
+
 ## Logbook
 
 Every finished session, newest first, with its date and total volume. The
@@ -237,7 +349,10 @@ a meaningful number.
 ## Library
 
 All 1,531 exercises from the Garmin database, searchable by name and
-filterable by equipment and muscle.
+filterable by equipment, muscle, and whether you added it yourself.
+
+The search box says how many it is actually searching — with filters on that
+figure drops, and a line underneath shows how many the current search leaves.
 
 **Pin** the ones you use often with the pin icon and they float to the top
 everywhere, including when building routines. Pin fifteen and you will rarely
@@ -246,16 +361,81 @@ search again.
 Tap an exercise for its primary and secondary muscles, its equipment, its
 Garmin code, and the heaviest you have ever logged on it.
 
-**+** in the corner adds a custom exercise if something is missing.
+**+** in the corner adds one of your own. Give it muscles and equipment at
+the same time — without them it cannot be reached by any filter and only
+exists if you remember its name.
 
-In the picker, the filter icon also offers **Only what I can do**, which hides
-anything needing equipment you have not listed.
+Your own exercises can be changed or removed from that same detail view.
+Renaming keeps the underlying identity, so routines follow the new name while
+sessions already logged keep the one they were recorded under. Deleting tells
+you first how many routines and sessions refer to it.
+
+The same search and filters appear when adding an exercise to a routine or a
+session.
+
+---
+
+## Track sessions
+
+**Home → Track session.** A stopwatch for interval running, drawn black with
+one very large figure because it is read at arm's length, outdoors, and often
+in the dark.
+
+The phone times and nothing else. It does not measure distance and does not
+pretend to — the distance is whichever button you press.
+
+**400 m** and **200 m** start the clock on the first tap, and record a rep on
+every tap after. The big figure shows the rep you are running; when you
+finish one it turns lavender and counts the recovery down instead. Splits
+stack above the buttons, newest first.
+
+**Recovery** adjusts in thirty second steps at the bottom. **Skip recovery**
+ends it early.
+
+### Cues
+
+You should not have to look at the screen.
+
+- Three short tones at three, two and one second of recovery remaining
+- A longer tone at zero, which is the moment the next rep starts
+- A short tone when a lap registers, so you know the tap took
+- A longer tone when the session starts
+
+The speaker icon mutes them. They play on the alarm channel rather than the
+media one, which is what makes them audible outdoors. The vibration happens
+whether they are muted or not.
+
+### What it records
+
+Saving writes an ordinary session: one set per rep, each with its time and
+distance, so it appears in the logbook and the calendar like anything else.
+
+The screen stays awake while it runs and releases when you leave.
+
+> **Not finished yet.** Distance is stored but not yet shown — a saved track
+> session currently reads `0 kg` in the logbook with the distance not
+> displayed anywhere. The cues also stop if you switch the screen off, since
+> the timer pauses when Android puts the app to sleep. Leave the screen on.
 
 ---
 
 ## Export and backup
 
-**More → Export** writes two files:
+**More → Export** opens a sheet: choose which files, then how much of your
+history to cover.
+
+The span can be all time, the last 30 or 90 days, this year, or between two
+dates. You can also narrow it to particular routines — sessions logged
+without a routine fall outside that, since they belong to none of them.
+
+**Narrowing applies to the spreadsheet only. The backup is written whole or
+not at all.** A shortened backup would restore without complaint and leave
+gaps with nothing to announce them, which is worse than no backup. You can
+skip the backup, but never truncate it.
+
+A narrowed spreadsheet is named `..._selection.csv` so it cannot be mistaken
+later for the full record, and the confirmation says how many sets came out
+— including when the answer is none.
 
 **`workout_sets_<date>.csv`** — one row per confirmed set, in long format,
 with workout fields repeated on every row so it pivots cleanly in a
@@ -311,6 +491,10 @@ from elsewhere means putting it there first.
 session. The start time and a timestamp for every set are recorded either
 way, so rest intervals can be reconstructed later even with the timer hidden.
 
+**Installed version** shows which build you are on. **Check for updates**
+opens the releases page so you can compare it against the current one. The
+app makes no network requests of its own — it hands the link to your browser.
+
 ---
 
 ## Updating the app
@@ -319,9 +503,10 @@ Every build is published at **Releases → Latest**, which opens on a phone and
 needs no account. Take the file ending `-arm64-v8a.apk` unless you know your
 phone needs another architecture.
 
-Each build carries its own number, so `wlog-1.0.0-b47-arm64-v8a.apk` is build
-47. That number rises on its own and is how you tell one download from
-another.
+Each build carries its own number, so `wlog-1.1.0-b47-arm64-v8a.apk` is build
+47 of version 1.1.0. That number rises on its own and is how you tell one
+download from another. Every build keeps its own permanent entry under
+Releases, so an older one can still be found.
 
 Builds are signed with a fixed key, so a new one installs over the old and
 keeps your data. If an install is ever refused, the signing key has changed.
@@ -335,6 +520,11 @@ database.
 - **Supersets.** No A1/A2 pairing. Log them as separate exercises.
 - **Warm-up flags.** Every logged set counts toward volume. Leave warm-ups
   unlogged, or accept them in the total.
-- **Rest timer.** The watch does it.
+- **Reminders.** The schedule shows what is due; nothing notifies you. That
+  keeps the app free of any Android permission, which it currently asks for
+  none of.
 
 Each was considered and cut. Any of them can be added later.
+
+The rest timer was on this list and is not any more — a routine can now carry
+a rest and count it down after each set.
