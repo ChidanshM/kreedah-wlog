@@ -39,7 +39,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     var version = '';
     try {
       final v = await Native.appVersion();
-      version = v.code.isEmpty ? v.name : '${v.name} (build ${v.code})';
+      version = _versionLabel(v.name, v.code);
     } catch (_) {
       version = 'unknown';
     }
@@ -50,6 +50,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _folderLabel = label;
       _version = version;
     });
+  }
+
+  /// Android's version code is not the build number on its own.
+  ///
+  /// Building one file per architecture means each needs a distinct code, so
+  /// the toolchain adds a per-architecture offset of a thousand: the 64-bit
+  /// build of build 45 is stored as 2045. Stripping it back means this agrees
+  /// with the number on the releases page instead of appearing two thousand
+  /// builds ahead.
+  static String _versionLabel(String name, String rawCode) {
+    final code = int.tryParse(rawCode);
+    if (code == null) return name.isEmpty ? 'unknown' : name;
+
+    const arch = {1: 'armeabi-v7a', 2: 'arm64-v8a', 3: 'x86_64'};
+    final build = code % 1000;
+    final abi = arch[code ~/ 1000];
+
+    return abi == null
+        ? '$name (build $code)'
+        : '$name (build $build, $abi)';
   }
 
   Future<void> _checkForUpdates() async {
