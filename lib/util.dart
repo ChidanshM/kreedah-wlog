@@ -160,6 +160,10 @@ class SetType {
   }
 }
 
+/// The library key a stopwatch session is recorded against. A single shared
+/// entry rather than one per distance, since the distance lives on each set.
+const trackExerciseKey = 'CUSTOM/TRACK_INTERVAL';
+
 const rpeChoices = [6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0];
 
 /// Renders a prescribed target as one line, or null when nothing is set.

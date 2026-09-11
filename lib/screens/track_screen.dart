@@ -32,7 +32,11 @@ class _TrackScreenState extends State<TrackScreen> {
   DateTime? _lapStartedAt;
   Timer? _ticker;
 
-  final _laps = <({int seconds, int metres})>[];
+  /// Each rep: how long it took, how far, and how many seconds into the
+  /// session it finished. The last of those is what a timestamp is built
+  /// from, since recoveries sit between reps and durations alone cannot
+  /// place them on a clock.
+  final _laps = <({int seconds, int metres, int atSecond})>[];
 
   /// Recovery countdown between reps, in seconds. Zero means not resting.
   int _restLeft = 0;
@@ -107,7 +111,11 @@ class _TrackScreenState extends State<TrackScreen> {
     HapticFeedback.heavyImpact();
     if (_sound) Native.beep();
     setState(() {
-      _laps.add((seconds: _lapElapsed, metres: metres));
+      _laps.add((
+        seconds: _lapElapsed,
+        metres: metres,
+        atSecond: _elapsed,
+      ));
       _lapStartedAt = DateTime.now();
       _restLeft = _restLength;
     });

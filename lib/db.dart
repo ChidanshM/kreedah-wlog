@@ -783,12 +783,32 @@ class Db {
   /// Kept on the same tables as everything else rather than a parallel
   /// structure, so it appears in the logbook, the calendar and the export
   /// without any of them needing to know it came from a stopwatch.
+  ///
+  /// [laps] carries the seconds elapsed from the start of the session at the
+  /// moment each rep finished, so a timestamp is that offset applied to the
+  /// start rather than anything derived from the lap's own duration.
   static Future<int> saveTrackSession({
-    required List<({int seconds, int metres})> laps,
+    required List<({int seconds, int metres, int atSecond})> laps,
     required DateTime start,
     DateTime? end,
     String name = 'Track session',
   }) async {
+    // The library needs a row for this or every reference to it dangles:
+    // no detail, and empty equipment and muscle columns in the export.
+    await _db.insert(
+      'custom_exercises',
+      {
+        'k': trackExerciseKey,
+        'n': 'Track interval',
+        'c': 'CUSTOM',
+        'g': '',
+        'p': 'QUADRICEPS,HAMSTRINGS,GLUTES,CALVES',
+        's': '',
+        'e': '',
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+
     final workoutId = await _db.insert('workouts', {
       'routine_id': null,
       'routine_name': name,
@@ -800,7 +820,7 @@ class Db {
 
     final weId = await _db.insert('workout_exercises', {
       'workout_id': workoutId,
-      'ex_key': 'CUSTOM/TRACK_INTERVAL',
+      'ex_key': trackExerciseKey,
       'ex_name': 'Track interval',
       'position': 0,
       'set_type': SetType.time,
@@ -820,7 +840,7 @@ class Db {
         'distance_m': laps[i].metres.toDouble(),
         'volume_kg': 0,
         'done': 1,
-        'ts': isoLocal(start.add(Duration(seconds: laps[i].seconds * i))),
+        'ts': isoLocal(start.add(Duration(seconds: laps[i].atSecond))),
       });
     }
     await batch.commit(noResult: true);
