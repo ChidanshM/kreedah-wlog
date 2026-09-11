@@ -490,21 +490,25 @@ class _CalendarScreenState extends State<CalendarScreen> {
           icon: const Icon(Icons.calendar_month_outlined),
           onPressed: _openJump,
         ),
-        centerTitle: true,
+        centerTitle: false,
         titleSpacing: 0,
+        // Today sits between two equal halves, each holding its switch
+        // centred, so the two switches are the same size and mirror each
+        // other about it.
         title: Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _viewToggle(),
+            Expanded(child: Center(child: _viewToggle())),
             TextButton(
               onPressed: () => setState(() {
                 _selected = _dayOf(DateTime.now());
                 _resetScroll();
               }),
-              child: const Text('Today'),
+              child: const Text(
+                'Today',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+              ),
             ),
-            _modeToggle(),
+            Expanded(child: Center(child: _modeToggle())),
           ],
         ),
       ),
@@ -558,8 +562,8 @@ class _SlideToggle extends StatelessWidget {
   final String tooltipFirst;
   final String tooltipSecond;
 
-  static const double _w = 64;
-  static const double _h = 32;
+  static const double _w = 96;
+  static const double _h = 34;
 
   @override
   Widget build(BuildContext context) {
