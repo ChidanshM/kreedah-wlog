@@ -50,6 +50,10 @@ class MainActivity : FlutterActivity() {
                     keepAwake(call.argument<Boolean>("on") ?: false)
                     result.success(true)
                 }
+                "beep" -> {
+                    beep(call.argument<Boolean>("long") ?: false)
+                    result.success(true)
+                }
                 else -> result.notImplemented()
             }
         } catch (e: Exception) {
@@ -158,6 +162,39 @@ class MainActivity : FlutterActivity() {
             ?.use { it.readBytes().toString(Charsets.UTF_8) }
             ?: throw IllegalStateException("Could not read that file")
         result.success(text)
+    }
+
+    /**
+     * A short pip or a longer go tone.
+     *
+     * Uses the platform tone generator rather than a sound file: nothing to
+     * bundle, nothing to decode, and it plays on the alarm stream so it is
+     * audible outdoors over the media volume being low. Some devices refuse
+     * to construct one, which is not worth failing a lap over.
+     */
+    private var tones: android.media.ToneGenerator? = null
+
+    private fun beep(long: Boolean) {
+        try {
+            if (tones == null) {
+                tones = android.media.ToneGenerator(
+                    android.media.AudioManager.STREAM_ALARM, 90
+                )
+            }
+            tones?.startTone(
+                if (long) android.media.ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD
+                else android.media.ToneGenerator.TONE_CDMA_PIP,
+                if (long) 600 else 150
+            )
+        } catch (e: Exception) {
+            // A missing tone is not a reason to interrupt a session.
+        }
+    }
+
+    override fun onDestroy() {
+        tones?.release()
+        tones = null
+        super.onDestroy()
     }
 
     /**

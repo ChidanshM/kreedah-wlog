@@ -92,4 +92,9 @@ class Native {
   /// session is unusable if the screen sleeps between reps.
   static Future<void> keepAwake(bool on) =>
       _channel.invokeMethod<bool>('keepAwake', {'on': on});
+
+  /// A short pip, or a longer tone for the moment itself. Plays on the alarm
+  /// stream so it carries outdoors.
+  static Future<void> beep({bool long = false}) =>
+      _channel.invokeMethod<bool>('beep', {'long': long});
 }

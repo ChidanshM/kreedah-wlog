@@ -38,6 +38,18 @@ class _TrackScreenState extends State<TrackScreen> {
   int _restLeft = 0;
   int _restLength = 120;
 
+  /// Audible cues. On by default, because the point of them is that you do
+  /// not have to look at the screen, but a shared track is a reason to mute.
+  bool _sound = true;
+
+  /// Cues fire on the transition into a second, never on the second itself,
+  /// so a rebuild cannot sound the same pip twice.
+  void _cue(int wasLeft, int nowLeft) {
+    if (!_sound || wasLeft == nowLeft) return;
+    if (nowLeft == 3 || nowLeft == 2 || nowLeft == 1) Native.beep();
+    if (nowLeft == 0) Native.beep(long: true);
+  }
+
   bool get _running => _startedAt != null;
 
   @override
@@ -59,7 +71,9 @@ class _TrackScreenState extends State<TrackScreen> {
       if (!mounted) return;
       setState(() {
         if (_restLeft > 0) {
+          final was = _restLeft;
           _restLeft--;
+          _cue(was, _restLeft);
           if (_restLeft == 0) HapticFeedback.mediumImpact();
         }
       });
@@ -76,6 +90,7 @@ class _TrackScreenState extends State<TrackScreen> {
 
   void _start() {
     HapticFeedback.mediumImpact();
+    if (_sound) Native.beep(long: true);
     setState(() {
       _startedAt = DateTime.now();
       _lapStartedAt = _startedAt;
@@ -90,6 +105,7 @@ class _TrackScreenState extends State<TrackScreen> {
       return;
     }
     HapticFeedback.heavyImpact();
+    if (_sound) Native.beep();
     setState(() {
       _laps.add((seconds: _lapElapsed, metres: metres));
       _lapStartedAt = DateTime.now();
@@ -149,6 +165,14 @@ class _TrackScreenState extends State<TrackScreen> {
                   IconButton(
                     icon: const Icon(Icons.close, color: Colors.white54),
                     onPressed: _finish,
+                  ),
+                  IconButton(
+                    tooltip: _sound ? 'Cues on' : 'Cues muted',
+                    icon: Icon(
+                      _sound ? Icons.volume_up : Icons.volume_off,
+                      color: _sound ? Colors.white54 : Colors.white24,
+                    ),
+                    onPressed: () => setState(() => _sound = !_sound),
                   ),
                   const Spacer(),
                   Text(
