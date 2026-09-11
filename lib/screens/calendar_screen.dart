@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../app_events.dart';
 import '../db.dart';
@@ -315,46 +316,35 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
   // ---------------------------------------------------------------- toggles
 
-  Widget _toggles() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(Bv.s3, Bv.s2, Bv.s3, Bv.s1),
-      child: Row(
-        children: [
-          Expanded(
-            child: SegmentedButton<_View>(
-              style: const ButtonStyle(visualDensity: VisualDensity.compact),
-              segments: const [
-                ButtonSegment(value: _View.month, label: Text('Month')),
-                ButtonSegment(value: _View.week, label: Text('Week')),
-              ],
-              selected: {_view},
-              showSelectedIcon: false,
-              onSelectionChanged: (s) => setState(() {
-                _view = s.first;
-                _resetScroll();
-              }),
-            ),
-          ),
-          const SizedBox(width: Bv.s2),
-          Expanded(
-            child: SegmentedButton<_Mode>(
-              style: const ButtonStyle(visualDensity: VisualDensity.compact),
-              segments: const [
-                ButtonSegment(value: _Mode.continuous, label: Text('Flow')),
-                ButtonSegment(value: _Mode.paged, label: Text('Page')),
-              ],
-              selected: {_mode},
-              showSelectedIcon: false,
-              onSelectionChanged: (s) => setState(() {
-                _mode = s.first;
-                _resetScroll();
-              }),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  /// The two view switches live in the app bar rather than a band of their
+  /// own, so the calendar itself gets that vertical space back.
+  ///
+  /// Both are sliding two-position controls rather than icons that light up:
+  /// neither state is "off", so a thumb moving between two choices describes
+  /// what is happening better than something switching on.
+  Widget _viewToggle() => _SlideToggle(
+        first: Icons.view_module,
+        second: Icons.view_week,
+        isFirst: _view == _View.month,
+        tooltipFirst: 'Month',
+        tooltipSecond: 'Week',
+        onChanged: (wantFirst) => setState(() {
+          _view = wantFirst ? _View.month : _View.week;
+          _resetScroll();
+        }),
+      );
+
+  Widget _modeToggle() => _SlideToggle(
+        first: Icons.unfold_more,
+        second: Icons.unfold_less,
+        isFirst: _mode == _Mode.continuous,
+        tooltipFirst: 'Scroll continuously',
+        tooltipSecond: 'One at a time',
+        onChanged: (wantFirst) => setState(() {
+          _mode = wantFirst ? _Mode.continuous : _Mode.paged;
+          _resetScroll();
+        }),
+      );
 
   // -------------------------------------------------------------- calendar
 
@@ -501,13 +491,21 @@ class _CalendarScreenState extends State<CalendarScreen> {
           onPressed: _openJump,
         ),
         centerTitle: true,
-        title: TextButton.icon(
-          onPressed: () => setState(() {
-            _selected = _dayOf(DateTime.now());
-            _resetScroll();
-          }),
-          icon: const Icon(Icons.today_outlined, size: 18),
-          label: const Text('Today'),
+        titleSpacing: 0,
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _viewToggle(),
+            TextButton(
+              onPressed: () => setState(() {
+                _selected = _dayOf(DateTime.now());
+                _resetScroll();
+              }),
+              child: const Text('Today'),
+            ),
+            _modeToggle(),
+          ],
         ),
       ),
       body: _loading
@@ -519,7 +517,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     : (28 + 20 + cellSize + 4);
                 return Column(
                   children: [
-                    _toggles(),
                     SizedBox(
                       height: calHeight,
                       child: _calendar(cellSize, landscape, box.maxWidth),
@@ -530,6 +527,105 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 );
               },
             ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+/// A two-position control with a thumb that slides between the choices.
+///
+/// Used where neither option is an "off" state. A switch that lights up
+/// implies one setting is absent; a thumb that moves implies two settings,
+/// one of which is currently chosen, which is what these actually are.
+class _SlideToggle extends StatelessWidget {
+  const _SlideToggle({
+    required this.first,
+    required this.second,
+    required this.isFirst,
+    required this.onChanged,
+    required this.tooltipFirst,
+    required this.tooltipSecond,
+  });
+
+  final IconData first;
+  final IconData second;
+  final bool isFirst;
+
+  /// Called with true when the left option is chosen.
+  final ValueChanged<bool> onChanged;
+
+  final String tooltipFirst;
+  final String tooltipSecond;
+
+  static const double _w = 64;
+  static const double _h = 32;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: _w,
+      height: _h,
+      margin: const EdgeInsets.symmetric(horizontal: 2),
+      decoration: BoxDecoration(
+        color: Bv.cream200,
+        borderRadius: BorderRadius.circular(_h / 2),
+        border: Border.all(color: Bv.cream400),
+      ),
+      child: Stack(
+        children: [
+          AnimatedAlign(
+            alignment: isFirst ? Alignment.centerLeft : Alignment.centerRight,
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            child: Container(
+              width: _w / 2,
+              height: _h,
+              decoration: BoxDecoration(
+                color: Bv.forest600,
+                borderRadius: BorderRadius.circular(_h / 2),
+              ),
+            ),
+          ),
+          Row(
+            children: [
+              _half(first, isFirst, tooltipFirst, () {
+                if (isFirst) return;
+                HapticFeedback.selectionClick();
+                onChanged(true);
+              }),
+              _half(second, !isFirst, tooltipSecond, () {
+                if (!isFirst) return;
+                HapticFeedback.selectionClick();
+                onChanged(false);
+              }),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _half(IconData icon, bool active, String tip, VoidCallback onTap) {
+    return Expanded(
+      child: Tooltip(
+        message: tip,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Center(
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              child: Icon(
+                icon,
+                key: ValueKey(active),
+                size: 18,
+                color: active ? Bv.cream100 : Bv.ink600,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
