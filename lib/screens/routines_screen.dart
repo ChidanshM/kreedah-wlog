@@ -495,7 +495,7 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
                       background: Container(
                         alignment: Alignment.centerLeft,
                         padding: const EdgeInsets.only(left: Bv.s4),
-                        color: Bv.sand300,
+                        color: Bv.sand400,
                         child: const Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
