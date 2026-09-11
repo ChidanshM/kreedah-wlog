@@ -6,7 +6,9 @@ import '../library.dart';
 import '../theme.dart';
 import '../util.dart';
 import 'routine_edit_screen.dart';
+import 'routine_detail_screen.dart';
 import 'guide_screen.dart';
+import 'schedule_screen.dart';
 import 'session_time_sheet.dart';
 import 'workout_screen.dart';
 
@@ -20,6 +22,7 @@ class RoutinesScreen extends StatefulWidget {
 class _RoutinesScreenState extends State<RoutinesScreen> {
   List<Map<String, dynamic>> _routines = const [];
   Map<String, dynamic>? _open;
+  int _archived = 0;
   bool _loading = true;
 
   @override
@@ -31,12 +34,58 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
   Future<void> _load() async {
     final routines = await Db.routines();
     final open = await Db.openWorkout();
+    final archived = await Db.archivedCount();
     if (!mounted) return;
     setState(() {
       _routines = routines;
       _open = open;
+      _archived = archived;
       _loading = false;
     });
+  }
+
+  Future<void> _openDetail(Map<String, dynamic> r) async {
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => RoutineDetailScreen(
+        routineId: r['id'] as int,
+        routineName: r['name'] as String,
+      ),
+    ));
+    await _load();
+  }
+
+  /// Archived routines are out of the way, not gone. Nothing else lists
+  /// them, so this is the only way back.
+  Future<void> _showArchived() async {
+    final rows = await Db.routines(archived: true);
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (c) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(Bv.s4, Bv.s4, Bv.s4, Bv.s2),
+              child: Text('Archived routines'),
+            ),
+            ...rows.map((r) => ListTile(
+                  leading: const Icon(Icons.inventory_2_outlined),
+                  title: Text(r['name'] as String),
+                  trailing: TextButton(
+                    onPressed: () async {
+                      await Db.archiveRoutine(r['id'] as int, false);
+                      if (c.mounted) Navigator.pop(c);
+                      await _load();
+                    },
+                    child: const Text('Restore'),
+                  ),
+                )),
+          ],
+        ),
+      ),
+    );
+    await _load();
   }
 
   Future<void> _newRoutine() async {
@@ -273,8 +322,12 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
             ListTile(
               leading: const Icon(Icons.history_toggle_off),
               title: const Text('Log a past session'),
-              subtitle: const Text('For a workout you did but did not record'),
               onTap: () => Navigator.pop(c, 'past'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.event_repeat_outlined),
+              title: const Text('Schedule'),
+              onTap: () => Navigator.pop(c, 'schedule'),
             ),
             const Divider(height: 1),
             ListTile(
@@ -312,6 +365,10 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
       case 'past':
         await _logPast(r);
         return;
+      case 'schedule':
+        await Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const ScheduleScreen()));
+        break;
       case 'export':
         await _exportRoutines(preselect: id);
         return;
@@ -430,28 +487,112 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
                       ),
                     ),
                   ..._routines.map(
-                    (r) => Card(
-                      child: ListTile(
-                        title: Text(r['name'] as String,
-                            style: theme.textTheme.titleMedium),
-                        subtitle: _RoutineSubtitle(routineId: r['id'] as int),
-                        trailing: Row(
+                    (r) => Dismissible(
+                      key: ValueKey('routine-${r['id']}'),
+                      // Left reveals red and removes; right reveals sand and
+                      // sets aside. Deleting asks first, archiving does not,
+                      // because one is reversible and the other is not.
+                      background: Container(
+                        alignment: Alignment.centerLeft,
+                        padding: const EdgeInsets.only(left: Bv.s4),
+                        color: Bv.sand300,
+                        child: const Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            IconButton(
-                              icon: const Icon(Icons.more_vert),
-                              onPressed: () => _routineMenu(r),
-                            ),
-                            FilledButton(
-                              onPressed: () => _start(r),
-                              child: const Text('Start'),
-                            ),
+                            Icon(Icons.inventory_2_outlined),
+                            SizedBox(width: Bv.s2),
+                            Text('Archive'),
                           ],
                         ),
-                        onTap: () => _routineMenu(r),
+                      ),
+                      secondaryBackground: Container(
+                        alignment: Alignment.centerRight,
+                        padding: const EdgeInsets.only(right: Bv.s4),
+                        color: Bv.error,
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('Delete',
+                                style: TextStyle(color: Bv.cream100)),
+                            SizedBox(width: Bv.s2),
+                            Icon(Icons.delete_outline, color: Bv.cream100),
+                          ],
+                        ),
+                      ),
+                      confirmDismiss: (dir) async {
+                        if (dir == DismissDirection.startToEnd) return true;
+                        return await showDialog<bool>(
+                              context: context,
+                              builder: (c) => AlertDialog(
+                                title: Text('Delete "${r['name']}"?'),
+                                content: const Text(
+                                    'Past sessions logged from this routine are kept. Only the plan is removed. Archive instead to keep it.'),
+                                actions: [
+                                  TextButton(
+                                      onPressed: () => Navigator.pop(c, false),
+                                      child: const Text('Cancel')),
+                                  FilledButton(
+                                      onPressed: () => Navigator.pop(c, true),
+                                      child: const Text('Delete')),
+                                ],
+                              ),
+                            ) ??
+                            false;
+                      },
+                      onDismissed: (dir) async {
+                        final id = r['id'] as int;
+                        if (dir == DismissDirection.startToEnd) {
+                          await Db.archiveRoutine(id, true);
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('${r['name']} archived'),
+                              action: SnackBarAction(
+                                label: 'Undo',
+                                onPressed: () async {
+                                  await Db.archiveRoutine(id, false);
+                                  await _load();
+                                },
+                              ),
+                            ),
+                          );
+                        } else {
+                          await Db.deleteRoutine(id);
+                        }
+                        await _load();
+                      },
+                      child: Card(
+                        child: ListTile(
+                          title: Text(r['name'] as String,
+                              style: theme.textTheme.titleMedium),
+                          subtitle: _RoutineSubtitle(routineId: r['id'] as int),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.more_vert),
+                                onPressed: () => _routineMenu(r),
+                              ),
+                              FilledButton(
+                                onPressed: () => _start(r),
+                                child: const Text('Start'),
+                              ),
+                            ],
+                          ),
+                          onTap: () => _openDetail(r),
+                        ),
                       ),
                     ),
                   ),
+                  if (_archived > 0)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(Bv.s4, Bv.s3, Bv.s4, 0),
+                      child: TextButton.icon(
+                        onPressed: _showArchived,
+                        icon: const Icon(Icons.inventory_2_outlined, size: 18),
+                        label: Text('$_archived archived'),
+                      ),
+                    ),
                 ],
               ),
             ),

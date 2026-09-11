@@ -78,7 +78,7 @@ class Db {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'workout_log.db'),
-      version: 6,
+      version: 7,
       onConfigure: (d) async {
         await d.execute('PRAGMA foreign_keys = ON');
       },
@@ -120,6 +120,12 @@ class Db {
         if (from < 6) {
           await d.execute('ALTER TABLE sets ADD COLUMN distance_m REAL');
         }
+        // v7: a routine can be set aside without being destroyed. Deleting
+        // loses the plan; archiving keeps it out of the way and reversible.
+        if (from < 7) {
+          await d.execute(
+              'ALTER TABLE routines ADD COLUMN archived INTEGER NOT NULL DEFAULT 0');
+        }
       },
       onCreate: (d, v) async {
         await d.execute('''
@@ -127,6 +133,7 @@ class Db {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             position INTEGER NOT NULL DEFAULT 0,
+            archived INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL
           )''');
 
@@ -257,10 +264,28 @@ class Db {
 
   /// Returned as a mutable copy: sqflite hands back a read-only result set,
   /// and a ReorderableListView needs to be able to move items within it.
-  static Future<List<Map<String, dynamic>>> routines() async =>
-      (await _db.query('routines', orderBy: 'position ASC, id ASC'))
+  ///
+  /// Archived routines are left out unless asked for. They still exist, and
+  /// sessions logged from them are untouched.
+  static Future<List<Map<String, dynamic>>> routines(
+          {bool archived = false}) async =>
+      (await _db.query('routines',
+              where: 'archived = ?',
+              whereArgs: [archived ? 1 : 0],
+              orderBy: 'position ASC, id ASC'))
           .map((e) => Map<String, dynamic>.from(e))
           .toList();
+
+  /// Set a routine aside, or bring it back.
+  static Future<void> archiveRoutine(int id, bool archived) => _db.update(
+      'routines', {'archived': archived ? 1 : 0},
+      where: 'id = ?', whereArgs: [id]);
+
+  static Future<int> archivedCount() async {
+    final r = await _db
+        .rawQuery('SELECT COUNT(*) c FROM routines WHERE archived = 1');
+    return ((r.first['c'] as num?) ?? 0).toInt();
+  }
 
   static Future<int> createRoutine(String name) async {
     final r = await _db.rawQuery('SELECT COALESCE(MAX(position), -1) m FROM routines');
