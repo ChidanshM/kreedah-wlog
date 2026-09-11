@@ -35,6 +35,23 @@ class Db {
     'target_weight_max',
   ];
 
+  /// Per-set departures from an exercise's shared target.
+  ///
+  /// A row exists only for a set that differs. With nothing here every set
+  /// takes the exercise's own targets, which is the common case and costs
+  /// one edit rather than one per set.
+  static const _routineSetsTable = '''
+    CREATE TABLE routine_sets(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      re_id INTEGER NOT NULL REFERENCES routine_exercises(id) ON DELETE CASCADE,
+      set_number INTEGER NOT NULL,
+      target_reps INTEGER,
+      target_weight REAL,
+      target_rpe REAL,
+      rest_sec INTEGER,
+      UNIQUE(re_id, set_number)
+    )''';
+
   /// A routine placed on the calendar.
   ///
   /// The rule is stored, not the individual days it produces. Occurrences are
@@ -61,7 +78,7 @@ class Db {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'workout_log.db'),
-      version: 4,
+      version: 5,
       onConfigure: (d) async {
         await d.execute('PRAGMA foreign_keys = ON');
       },
@@ -87,6 +104,17 @@ class Db {
         if (from < 4) {
           await d.execute(_scheduleTable);
         }
+        // v5: a routine's sets can differ from one another, and each can
+        // carry a rest. Shared values stay on the exercise; a row here
+        // exists only for a set that departs from them.
+        if (from < 5) {
+          await d.execute(_routineSetsTable);
+          await d.execute(
+              'ALTER TABLE routine_exercises ADD COLUMN per_set INTEGER NOT NULL DEFAULT 0');
+          await d.execute(
+              'ALTER TABLE routine_exercises ADD COLUMN rest_sec INTEGER');
+          await d.execute('ALTER TABLE sets ADD COLUMN rest_sec INTEGER');
+        }
       },
       onCreate: (d, v) async {
         await d.execute('''
@@ -108,6 +136,8 @@ class Db {
             unilateral INTEGER NOT NULL DEFAULT 0,
             unit TEXT NOT NULL DEFAULT 'kg',
             target_sets INTEGER NOT NULL DEFAULT 3,
+            per_set INTEGER NOT NULL DEFAULT 0,
+            rest_sec INTEGER,
             target_reps_min INTEGER,
             target_reps_max INTEGER,
             target_rpe_min REAL,
@@ -188,6 +218,7 @@ class Db {
         await d.execute('CREATE TABLE pinned(ex_key TEXT PRIMARY KEY)');
         await d.execute('CREATE TABLE settings(k TEXT PRIMARY KEY, v TEXT)');
         await d.execute(_scheduleTable);
+        await d.execute(_routineSetsTable);
 
         await d.execute(
             'CREATE INDEX idx_we_workout ON workout_exercises(workout_id)');
@@ -315,6 +346,53 @@ class Db {
     }
     await batch.commit(noResult: true);
   }
+
+  // --------------------------------------------------------- per-set detail
+
+  /// Departures from an exercise's shared target, keyed by set number.
+  ///
+  /// Empty when every set is the same, which is the usual case. A routine
+  /// only grows rows here for sets that actually differ.
+  static Future<Map<int, Map<String, dynamic>>> routineSetOverrides(
+      int reId) async {
+    final rows = await _db.query('routine_sets',
+        where: 're_id = ?', whereArgs: [reId], orderBy: 'set_number ASC');
+    return {
+      for (final r in rows)
+        (r['set_number'] as int): Map<String, dynamic>.from(r)
+    };
+  }
+
+  static Future<void> setRoutineSetOverride(
+    int reId,
+    int setNumber, {
+    int? reps,
+    double? weight,
+    double? rpe,
+    int? restSec,
+  }) async {
+    await _db.insert(
+      'routine_sets',
+      {
+        're_id': reId,
+        'set_number': setNumber,
+        'target_reps': reps,
+        'target_weight': weight,
+        'target_rpe': rpe,
+        'rest_sec': restSec,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  static Future<void> clearRoutineSetOverride(int reId, int setNumber) =>
+      _db.delete('routine_sets',
+          where: 're_id = ? AND set_number = ?', whereArgs: [reId, setNumber]);
+
+  /// Drop every per-set row, used when an exercise goes back to one shared
+  /// target so stale rows cannot linger invisibly.
+  static Future<void> clearRoutineSetOverrides(int reId) =>
+      _db.delete('routine_sets', where: 're_id = ?', whereArgs: [reId]);
 
   // ------------------------------------------------- routines, in and out
 
@@ -811,6 +889,10 @@ class Db {
                 re['unit'] as String),
         fallbackReps: (re['target_reps_min'] as num?)?.toInt(),
         fallbackRpe: (re['target_rpe_min'] as num?)?.toDouble(),
+        perSet: (re['per_set'] as int? ?? 0) == 1
+            ? await routineSetOverrides(re['id'] as int)
+            : null,
+        restDefault: re['rest_sec'] as int?,
       );
     }
     return workoutId;
@@ -983,6 +1065,8 @@ class Db {
     double? fallbackWeightKg,
     int? fallbackReps,
     double? fallbackRpe,
+    Map<int, Map<String, dynamic>>? perSet,
+    int? restDefault,
   }) async {
     // Group the previous performance by set number.
     final prevBySet = <int, List<Map<String, dynamic>>>{};
@@ -996,6 +1080,15 @@ class Db {
 
     final batch = _db.batch();
     for (var i = 1; i <= count; i++) {
+      // A set that departs from the exercise's shared target overrides it.
+      // What was actually done last time still wins over both: a target is
+      // an intention, history is evidence.
+      final ov = perSet?[i];
+      final ovKg = (ov?['target_weight'] as num?) == null
+          ? null
+          : toKg((ov!['target_weight'] as num).toDouble(), unit);
+      final rest = (ov?['rest_sec'] as int?) ?? restDefault;
+
       final source = prevBySet[i] ??
           (prevNumbers.isEmpty ? null : prevBySet[prevNumbers.last]);
       final sides = unilateral ? const ['R', 'L'] : const ['both'];
@@ -1007,10 +1100,16 @@ class Db {
             orElse: () => source.first,
           );
         }
-        final kg = (src?['weight_kg'] as num?)?.toDouble() ?? fallbackWeightKg;
+        final kg = (src?['weight_kg'] as num?)?.toDouble() ??
+            ovKg ??
+            fallbackWeightKg;
         final reps = (src?['reps'] as int?) ??
-            (setType == SetType.reps ? fallbackReps : null);
-        final rpe = (src?['rpe'] as num?)?.toDouble() ?? fallbackRpe;
+            (setType == SetType.reps
+                ? ((ov?['target_reps'] as int?) ?? fallbackReps)
+                : null);
+        final rpe = (src?['rpe'] as num?)?.toDouble() ??
+            (ov?['target_rpe'] as num?)?.toDouble() ??
+            fallbackRpe;
         // Backdated sessions arrive already confirmed where there is
         // something to confirm, since filling one in is transcription.
         final filled = kg != null ||
@@ -1035,6 +1134,7 @@ class Db {
           'volume_kg': done ? double.parse(vol.toStringAsFixed(2)) : 0,
           'done': done ? 1 : 0,
           'ts': done ? stamp : null,
+          'rest_sec': rest,
         });
       }
     }

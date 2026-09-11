@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../app_events.dart';
 import '../db.dart';
@@ -75,6 +76,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   @override
   void dispose() {
     _ticker?.cancel();
+    _restTicker?.cancel();
     super.dispose();
   }
 
@@ -178,6 +180,11 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     }
     for (final r in rows) {
       await Db.markDone(r['id'] as int, anyUndone);
+    }
+    // Only when confirming, and only if the routine asked for a rest.
+    if (anyUndone) {
+      final rest = rows.first['rest_sec'] as int?;
+      if (rest != null && rest > 0) _startRest(rest);
     }
     await _load();
   }
@@ -359,6 +366,56 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     await _load();
   }
 
+  /// Counts down the rest a routine asked for after a set is confirmed.
+  ///
+  /// A banner rather than a blocking dialog: a rest timer that stops you
+  /// logging the next set is worse than no timer. It can be dismissed, and
+  /// it never prevents anything.
+  int _restLeft = 0;
+  Timer? _restTicker;
+
+  void _startRest(int seconds) {
+    _restTicker?.cancel();
+    if (seconds <= 0) return;
+    setState(() => _restLeft = seconds);
+    _restTicker = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      setState(() => _restLeft--);
+      if (_restLeft <= 0) {
+        t.cancel();
+        HapticFeedback.mediumImpact();
+      }
+    });
+  }
+
+  void _stopRest() {
+    _restTicker?.cancel();
+    setState(() => _restLeft = 0);
+  }
+
+  Widget _restBanner() => Container(
+        width: double.infinity,
+        color: Bv.forest600,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            const Icon(Icons.hourglass_bottom, color: Bv.cream100, size: 18),
+            const SizedBox(width: 8),
+            Text('Rest ${mmss(_restLeft)}',
+                style: BvType.bodyMd.copyWith(color: Bv.cream100)),
+            const Spacer(),
+            TextButton(
+              onPressed: _stopRest,
+              child: Text('Skip',
+                  style: BvType.bodySm.copyWith(color: Bv.cream100)),
+            ),
+          ],
+        ),
+      );
+
   Future<void> _finish() async {
     final summary = await Db.workoutSummary(widget.workoutId);
     if (!mounted) return;
@@ -463,36 +520,44 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : ReorderableListView.builder(
-              padding: const EdgeInsets.only(bottom: 110),
-              itemCount: _exercises.length,
-              // Dragging starts from the handle only. The cards are full of
-              // tap targets, and a long press anywhere would rearrange the
-              // session while you were reaching for Log.
-              buildDefaultDragHandles: false,
-              header: _volumeHeader(),
-              footer: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                child: OutlinedButton.icon(
-                  onPressed: _addExercise,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add exercise'),
+          : Column(
+              children: [
+                if (_restLeft > 0) _restBanner(),
+                Expanded(
+                  child: ReorderableListView.builder(
+                    padding: const EdgeInsets.only(bottom: 110),
+                    itemCount: _exercises.length,
+                    // Dragging starts from the handle only. The cards are
+                    // full of tap targets, and a long press anywhere would
+                    // rearrange the session while you were reaching for Log.
+                    buildDefaultDragHandles: false,
+                    header: _volumeHeader(),
+                    footer: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                      child: OutlinedButton.icon(
+                        onPressed: _addExercise,
+                        icon: const Icon(Icons.add),
+                        label: const Text('Add exercise'),
+                      ),
+                    ),
+                    onReorder: (oldIndex, newIndex) async {
+                      if (newIndex > oldIndex) newIndex -= 1;
+                      if (oldIndex == newIndex) return;
+                      // Move locally first so the list settles under the
+                      // finger, then persist and reload.
+                      setState(() {
+                        final vm = _exercises.removeAt(oldIndex);
+                        _exercises.insert(newIndex, vm);
+                      });
+                      await Db.reorderWorkoutExercises(
+                          _exercises.map((e) => e.id).toList());
+                      await _load();
+                    },
+                    itemBuilder: (context, i) =>
+                        _exerciseCard(_exercises[i], i),
+                  ),
                 ),
-              ),
-              onReorder: (oldIndex, newIndex) async {
-                if (newIndex > oldIndex) newIndex -= 1;
-                if (oldIndex == newIndex) return;
-                // Move locally first so the list settles under the finger,
-                // then persist and reload.
-                setState(() {
-                  final vm = _exercises.removeAt(oldIndex);
-                  _exercises.insert(newIndex, vm);
-                });
-                await Db.reorderWorkoutExercises(
-                    _exercises.map((e) => e.id).toList());
-                await _load();
-              },
-              itemBuilder: (context, i) => _exerciseCard(_exercises[i], i),
+              ],
             ),
     );
   }

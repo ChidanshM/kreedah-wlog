@@ -181,6 +181,15 @@ class _ExerciseConfigSheetState extends State<_ExerciseConfigSheet> {
   late bool _unilateral = (widget.row['unilateral'] as int) == 1;
   late int _sets = widget.row['target_sets'] as int;
 
+  /// Off means every set takes the shared target below, which is the usual
+  /// case and one edit rather than one per set.
+  late bool _perSet = (widget.row['per_set'] as int? ?? 0) == 1;
+  late final _rest = _ctl(widget.row['rest_sec']);
+
+  /// Four controllers per set, built only for the sets that exist.
+  final _over = <int, List<TextEditingController>>{};
+  bool _loadedOverrides = false;
+
   // Targets. Each is a low value and an optional high one: leave the second
   // empty for a single figure rather than a range.
   late final _repsLo = _ctl(widget.row['target_reps_min']);
@@ -189,6 +198,31 @@ class _ExerciseConfigSheetState extends State<_ExerciseConfigSheet> {
   late final _rpeHi = _ctl(widget.row['target_rpe_max']);
   late final _wLo = _ctl(widget.row['target_weight_min']);
   late final _wHi = _ctl(widget.row['target_weight_max']);
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOverrides();
+  }
+
+  Future<void> _loadOverrides() async {
+    final rows = await Db.routineSetOverrides(widget.row['id'] as int);
+    if (!mounted) return;
+    setState(() {
+      rows.forEach((n, r) {
+        _over[n] = [
+          _ctl(r['target_reps']),
+          _ctl(r['target_weight']),
+          _ctl(r['target_rpe']),
+          _ctl(r['rest_sec']),
+        ];
+      });
+      _loadedOverrides = true;
+    });
+  }
+
+  List<TextEditingController> _ctlsFor(int n) => _over.putIfAbsent(
+      n, () => [_ctl(null), _ctl(null), _ctl(null), _ctl(null)]);
 
   TextEditingController _ctl(Object? v) => TextEditingController(
       text: v is num ? num2(v.toDouble()) : '');
@@ -206,8 +240,13 @@ class _ExerciseConfigSheetState extends State<_ExerciseConfigSheet> {
 
   @override
   void dispose() {
-    for (final c in [_repsLo, _repsHi, _rpeLo, _rpeHi, _wLo, _wHi]) {
+    for (final c in [_repsLo, _repsHi, _rpeLo, _rpeHi, _wLo, _wHi, _rest]) {
       c.dispose();
+    }
+    for (final list in _over.values) {
+      for (final c in list) {
+        c.dispose();
+      }
     }
     super.dispose();
   }
@@ -258,6 +297,122 @@ class _ExerciseConfigSheetState extends State<_ExerciseConfigSheet> {
         ],
       ),
     );
+  }
+
+  /// One row per set. Blank means "same as the target above", so a routine
+  /// where only the last set differs carries one filled row.
+  Widget _perSetTable() {
+    final countLabel = _setType == SetType.time
+        ? 'secs'
+        : _setType == SetType.distance
+            ? 'steps'
+            : 'reps';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            const SizedBox(width: 26),
+            Expanded(child: Text(countLabel.toUpperCase(), style: BvType.label)),
+            const SizedBox(width: 6),
+            Expanded(child: Text(_unit.toUpperCase(), style: BvType.label)),
+            const SizedBox(width: 6),
+            Expanded(child: Text('RPE', style: BvType.label)),
+            const SizedBox(width: 6),
+            Expanded(child: Text('REST', style: BvType.label)),
+          ],
+        ),
+        const SizedBox(height: 4),
+        for (var n = 1; n <= _sets; n++) _perSetRow(n),
+        const SizedBox(height: 8),
+      ],
+    );
+  }
+
+  Widget _perSetRow(int n) {
+    final c = _ctlsFor(n);
+    Widget box(TextEditingController ctl, {bool decimal = false}) => Expanded(
+          child: TextField(
+            controller: ctl,
+            keyboardType: TextInputType.numberWithOptions(decimal: decimal),
+            inputFormatters: [
+              decimal
+                  ? FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
+                  : FilteringTextInputFormatter.digitsOnly
+            ],
+            style: BvType.bodySm,
+            decoration: const InputDecoration(
+              isDense: true,
+              contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+              hintText: '—',
+            ),
+          ),
+        );
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        children: [
+          SizedBox(width: 26, child: Text('$n', style: BvType.label)),
+          box(c[0]),
+          const SizedBox(width: 6),
+          box(c[1], decimal: true),
+          const SizedBox(width: 6),
+          box(c[2], decimal: true),
+          const SizedBox(width: 6),
+          box(c[3]),
+        ],
+      ),
+    );
+  }
+
+  /// Per-set rows are written straight to the database, since they live in
+  /// their own table rather than on the exercise row the sheet returns.
+  Future<void> _save() async {
+    final reId = widget.row['id'] as int;
+
+    if (!_perSet) {
+      // Dropped rather than hidden: rows that reappear when a switch is
+      // turned back on are invisible state waiting to confuse someone.
+      await Db.clearRoutineSetOverrides(reId);
+    } else {
+      for (var n = 1; n <= _sets; n++) {
+        final c = _ctlsFor(n);
+        final reps = _num(c[0])?.round();
+        final weight = _num(c[1]);
+        final rpe = _num(c[2]);
+        final rest = _num(c[3])?.round();
+        if (reps == null && weight == null && rpe == null && rest == null) {
+          await Db.clearRoutineSetOverride(reId, n);
+        } else {
+          await Db.setRoutineSetOverride(reId, n,
+              reps: reps, weight: weight, rpe: rpe, restSec: rest);
+        }
+      }
+      // A set that no longer exists should not keep a row.
+      for (final n in _over.keys.where((k) => k > _sets).toList()) {
+        await Db.clearRoutineSetOverride(reId, n);
+      }
+    }
+
+    if (!mounted) return;
+    Navigator.pop(context, {
+      'set_type': _setType,
+      'unit': _unit,
+      'unilateral': _unilateral ? 1 : 0,
+      'target_sets': _sets,
+      'per_set': _perSet ? 1 : 0,
+      'rest_sec': _num(_rest)?.round(),
+      'target_reps_min': _num(_repsLo)?.round(),
+      'target_reps_max': _num(_repsHi)?.round(),
+      'target_rpe_min': _num(_rpeLo),
+      'target_rpe_max': _num(_rpeHi),
+      // Stored exactly as typed, in the unit above.
+      'target_weight_min': _num(_wLo),
+      'target_weight_max': _num(_wHi),
+    });
   }
 
   @override
@@ -342,6 +497,49 @@ class _ExerciseConfigSheetState extends State<_ExerciseConfigSheet> {
                 ''),
             _rangeRow('Weight', _wLo, _wHi, _unit),
             _rangeRow('RPE', _rpeLo, _rpeHi, ''),
+
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                children: [
+                  SizedBox(width: 86, child: Text('Rest', style: BvType.label)),
+                  Expanded(
+                    child: TextField(
+                      controller: _rest,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      decoration: const InputDecoration(
+                          hintText: 'seconds after each set'),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 34,
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 6),
+                      child: Text('s', style: BvType.bodySm),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const Divider(),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _perSet,
+              onChanged: _loadedOverrides
+                  ? (v) => setState(() => _perSet = v)
+                  : null,
+              title: const Text('Different values per set'),
+              subtitle: Text(
+                _perSet
+                    ? 'Anything left blank falls back to the target above'
+                    : 'Every set uses the target above',
+                style: BvType.bodySm,
+              ),
+            ),
+            if (_perSet) _perSetTable(),
+
             const SizedBox(height: 4),
             Row(
               children: [
@@ -353,21 +551,7 @@ class _ExerciseConfigSheetState extends State<_ExerciseConfigSheet> {
                 ),
                 const Spacer(),
                 FilledButton(
-                  onPressed: () {
-                    Navigator.pop(context, {
-                      'set_type': _setType,
-                      'unit': _unit,
-                      'unilateral': _unilateral ? 1 : 0,
-                      'target_sets': _sets,
-                      'target_reps_min': _num(_repsLo)?.round(),
-                      'target_reps_max': _num(_repsHi)?.round(),
-                      'target_rpe_min': _num(_rpeLo),
-                      'target_rpe_max': _num(_rpeHi),
-                      // Stored exactly as typed, in the unit above.
-                      'target_weight_min': _num(_wLo),
-                      'target_weight_max': _num(_wHi),
-                    });
-                  },
+                  onPressed: _save,
                   child: const Text('Save'),
                 ),
               ],
