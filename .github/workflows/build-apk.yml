@@ -51,12 +51,13 @@ jobs:
           echo "dir=$DIR" >> "$GITHUB_OUTPUT"
 
           # The version name comes from pubspec and only moves when you move
-          # it. The build number is the commit count, so it rises on every
-          # push. Android compares build numbers, and anything watching the
-          # releases for updates compares the file name, so both need to
-          # change or a new build looks identical to the last one.
+          # it. The build number is the commit count plus a fixed offset,
+          # matching the formula the commit helper uses for the checkpoint
+          # number, so a release and the commit subjects inside it carry the
+          # same figure. The offset exists because the two sequences started
+          # apart; changing it here means changing it in the helper too.
           V=$(grep -m1 '^version:' "$DIR/pubspec.yaml" | sed 's/version: *//' | cut -d'+' -f1)
-          BUILD=$(git rev-list --count HEAD)
+          BUILD=$(( $(git rev-list --count HEAD) + 3 ))
           SHA=$(git rev-parse --short HEAD)
           echo "version=$V"
           echo "build=$BUILD"
