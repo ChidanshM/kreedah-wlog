@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../db.dart';
 import '../library.dart';
-import '../saf.dart';
 import '../theme.dart';
 import '../util.dart';
 import 'exercise_filter_sheet.dart';
