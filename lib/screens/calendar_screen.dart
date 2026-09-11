@@ -195,11 +195,15 @@ class _CalendarScreenState extends State<CalendarScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text('${day.day}',
-                style: BvType.bodySm.copyWith(
-                  color: inPeriod ? Bv.textPrimary : Bv.sand500,
-                  fontWeight: isToday ? FontWeight.w600 : FontWeight.w400,
-                )),
+            // The 1st names its month, which is the only place that context
+            // exists in week view now the heading is gone.
+            Text(
+              day.day == 1 ? '1 ${_monthShort(day)}' : '${day.day}',
+              style: BvType.bodySm.copyWith(
+                color: inPeriod ? Bv.textPrimary : Bv.sand500,
+                fontWeight: isToday ? FontWeight.w600 : FontWeight.w400,
+              ),
+            ),
             const SizedBox(height: 2),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -287,16 +291,13 @@ class _CalendarScreenState extends State<CalendarScreen> {
     );
   }
 
+  /// No heading in week view: the week number is already in the gutter and
+  /// the dates are in the cells, so a line repeating both earns nothing. The
+  /// month is carried by the cells themselves, which name it on the 1st.
   Widget _weekBlock(DateTime weekStart, double cellSize) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(Bv.s3, Bv.s2, Bv.s3, Bv.s1),
-            child: Text(
-              'Week ${isoWeekNumber(weekStart)}   ${prettyDate(weekStart)} \u2013 ${prettyDate(weekStart.add(const Duration(days: 6)))}',
-              style: BvType.label,
-            ),
-          ),
+          const SizedBox(height: Bv.s2),
           _weekdayHeads(),
           _weekRow(weekStart, cellSize),
         ],
@@ -305,6 +306,14 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Widget _block(DateTime start, double cellSize) => _view == _View.month
       ? _monthBlock(start, cellSize)
       : _weekBlock(start, cellSize);
+
+  static String _monthShort(DateTime d) {
+    const m = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    return m[d.month - 1];
+  }
 
   static String _monthLabel(DateTime d) {
     const months = [
@@ -373,7 +382,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
     final horizontal = landscape;
     final extent = _view == _View.month
         ? (34 + 20 + 6 * (cellSize + 4))
-        : (28 + 20 + cellSize + 4);
+        : (Bv.s2 + 20 + cellSize + 4);
 
     _scroll ??= ScrollController(
       initialScrollOffset: _span * (horizontal ? viewportWidth : extent),
@@ -481,7 +490,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Widget build(BuildContext context) {
     final landscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
-    final cellSize = landscape ? 34.0 : 46.0;
+    // A week is one row, so it can afford far more height than a cell in a
+    // six-row month. At the month's size it left most of the screen empty.
+    final cellSize = _view == _View.month
+        ? (landscape ? 34.0 : 46.0)
+        : (landscape ? 56.0 : 96.0);
 
     return Scaffold(
       appBar: AppBar(
@@ -518,7 +531,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
               builder: (context, box) {
                 final calHeight = _view == _View.month
                     ? (34 + 20 + 6 * (cellSize + 4))
-                    : (28 + 20 + cellSize + 4);
+                    : (Bv.s2 + 20 + cellSize + 4);
                 return Column(
                   children: [
                     SizedBox(
