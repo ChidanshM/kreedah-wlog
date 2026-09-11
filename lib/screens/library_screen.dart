@@ -17,27 +17,7 @@ class LibraryScreen extends StatefulWidget {
 class _LibraryScreenState extends State<LibraryScreen> {
   final _controller = TextEditingController();
   ExerciseFilter _filter = emptyExerciseFilter;
-  Set<String> _owned = {};
   String _query = '';
-
-  @override
-  void initState() {
-    super.initState();
-    _loadOwned();
-  }
-
-  /// Everything the Equipment page says you have, expanded into the codes the
-  /// exercise data uses.
-  Future<void> _loadOwned() async {
-    final kinds = await Db.equipmentKindsOwned();
-    final gear = (await Db.setting(gearSettingKey)) ?? '';
-    final owned = <String>{};
-    for (final k in kinds) {
-      owned.addAll(EquipKind.tags[k] ?? const []);
-    }
-    owned.addAll(gear.split(',').where((e) => e.isNotEmpty));
-    if (mounted) setState(() => _owned = owned);
-  }
 
   Future<void> _openFilters() async {
     final next = await pickExerciseFilter(context, _filter);
@@ -118,9 +98,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       _query,
       equipment: _filter.equipment,
       muscles: _filter.muscles,
-      onlyMyEquipment: _filter.onlyMine,
       onlyCustom: _filter.onlyCustom,
-      ownedEquipment: _owned,
     );
     final pinnedCount = ExerciseLibrary.pinned.length;
     final active = filterIsActive(_filter);
@@ -129,9 +107,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final available = ExerciseLibrary.countMatching(
       equipment: _filter.equipment,
       muscles: _filter.muscles,
-      onlyMyEquipment: _filter.onlyMine,
       onlyCustom: _filter.onlyCustom,
-      ownedEquipment: _owned,
     );
 
     return Scaffold(
@@ -183,25 +159,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     Padding(
                       padding: const EdgeInsets.only(right: 6),
                       child: InputChip(
-                        label: const Text('My own'),
+                        label: const Text('Custom exercises'),
                         onDeleted: () => setState(() => _filter = (
                               equipment: _filter.equipment,
                               muscles: _filter.muscles,
-                              onlyMine: _filter.onlyMine,
                               onlyCustom: false,
-                            )),
-                      ),
-                    ),
-                  if (_filter.onlyMine)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: InputChip(
-                        label: const Text('My equipment'),
-                        onDeleted: () => setState(() => _filter = (
-                              equipment: _filter.equipment,
-                              muscles: _filter.muscles,
-                              onlyMine: false,
-                              onlyCustom: _filter.onlyCustom,
                             )),
                       ),
                     ),

@@ -11,28 +11,24 @@ import '../util.dart';
 typedef ExerciseFilter = ({
   Set<String> equipment,
   Set<String> muscles,
-  bool onlyMine,
   bool onlyCustom,
 });
 
 const ExerciseFilter emptyExerciseFilter = (
   equipment: <String>{},
   muscles: <String>{},
-  onlyMine: false,
   onlyCustom: false,
 );
 
 bool filterIsActive(ExerciseFilter f) =>
-    f.equipment.isNotEmpty || f.muscles.isNotEmpty || f.onlyMine || f.onlyCustom;
+    f.equipment.isNotEmpty || f.muscles.isNotEmpty || f.onlyCustom;
 
 Future<ExerciseFilter?> pickExerciseFilter(
   BuildContext context,
-  ExerciseFilter current, {
-  bool offerOnlyMine = true,
-}) {
+  ExerciseFilter current,
+) {
   final equipment = {...current.equipment};
   final muscles = {...current.muscles};
-  var onlyMine = current.onlyMine;
   var onlyCustom = current.onlyCustom;
 
   return showModalBottomSheet<ExerciseFilter>(
@@ -51,21 +47,11 @@ Future<ExerciseFilter?> pickExerciseFilter(
                 children: [
                   Text('Narrow the list', style: BvType.headlineSm),
                   const SizedBox(height: Bv.s2),
-                  if (offerOnlyMine) ...[
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: onlyMine,
-                      title: const Text('Only what I can do'),
-                      subtitle: const Text(
-                          'Hides anything needing gear not on your Equipment page'),
-                      onChanged: (v) => setSheet(() => onlyMine = v),
-                    ),
-                  ],
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     value: onlyCustom,
-                    title: const Text('Only my own exercises'),
-                    subtitle: const Text('The ones you added by hand'),
+                    title: const Text('Custom exercises'),
+                    subtitle: const Text('Only the ones you added yourself'),
                     onChanged: (v) => setSheet(() => onlyCustom = v),
                   ),
                   const Divider(),
@@ -119,7 +105,6 @@ Future<ExerciseFilter?> pickExerciseFilter(
                       onPressed: () => setSheet(() {
                         equipment.clear();
                         muscles.clear();
-                        onlyMine = false;
                         onlyCustom = false;
                       }),
                       child: const Text('Clear'),
@@ -131,7 +116,6 @@ Future<ExerciseFilter?> pickExerciseFilter(
                         (
                           equipment: equipment,
                           muscles: muscles,
-                          onlyMine: onlyMine,
                           onlyCustom: onlyCustom,
                         ),
                       ),

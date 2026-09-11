@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 
-import '../db.dart';
 import '../library.dart';
+import '../theme.dart';
 import '../util.dart';
+import 'exercise_filter_sheet.dart';
 
 /// Opens the picker and returns the exercises that were selected.
 Future<List<Exercise>?> pickExercises(BuildContext context,
@@ -23,17 +24,8 @@ class ExercisePicker extends StatefulWidget {
 class _ExercisePickerState extends State<ExercisePicker> {
   final _controller = TextEditingController();
   final _selected = <String, Exercise>{};
-  final _equipment = <String>{};
-  final _muscles = <String>{};
-  bool _onlyMine = false;
-  Set<String> _owned = {};
+  ExerciseFilter _filter = emptyExerciseFilter;
   String _query = '';
-
-  @override
-  void initState() {
-    super.initState();
-    _loadOwned();
-  }
 
   @override
   void dispose() {
@@ -41,26 +33,26 @@ class _ExercisePickerState extends State<ExercisePicker> {
     super.dispose();
   }
 
-  Future<void> _loadOwned() async {
-    final kinds = await Db.equipmentKindsOwned();
-    final gear = (await Db.setting(gearSettingKey)) ?? '';
-    final owned = <String>{};
-    for (final k in kinds) {
-      owned.addAll(EquipKind.tags[k] ?? const []);
-    }
-    owned.addAll(gear.split(',').where((e) => e.isNotEmpty));
-    if (!mounted) return;
-    setState(() => _owned = owned);
+  Future<void> _openFilters() async {
+    final next = await pickExerciseFilter(context, _filter);
+    if (next != null && mounted) setState(() => _filter = next);
   }
 
   @override
   Widget build(BuildContext context) {
     final results = ExerciseLibrary.search(
       _query,
-      equipment: _equipment,
-      muscles: _muscles,
-      onlyMyEquipment: _onlyMine,
-      ownedEquipment: _owned,
+      equipment: _filter.equipment,
+      muscles: _filter.muscles,
+      onlyCustom: _filter.onlyCustom,
+    );
+    final active = filterIsActive(_filter);
+    // What the filters alone leave, so the field never claims to search more
+    // than it will actually look through.
+    final available = ExerciseLibrary.countMatching(
+      equipment: _filter.equipment,
+      muscles: _filter.muscles,
+      onlyCustom: _filter.onlyCustom,
     );
 
     return Scaffold(
@@ -70,9 +62,9 @@ class _ExercisePickerState extends State<ExercisePicker> {
             : '${_selected.length} selected'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.filter_list),
+            icon: Icon(active ? Icons.filter_alt : Icons.filter_alt_outlined),
             onPressed: _openFilters,
-            tooltip: 'Filters',
+            tooltip: 'Filter',
           ),
         ],
       ),
@@ -92,7 +84,7 @@ class _ExercisePickerState extends State<ExercisePicker> {
               controller: _controller,
               autofocus: true,
               decoration: InputDecoration(
-                hintText: 'Search 1531 exercises',
+                hintText: 'Search $available exercises',
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: _query.isEmpty
                     ? null
@@ -107,36 +99,53 @@ class _ExercisePickerState extends State<ExercisePicker> {
               onChanged: (v) => setState(() => _query = v),
             ),
           ),
-          if (_equipment.isNotEmpty || _muscles.isNotEmpty || _onlyMine)
+          if (active)
             SizedBox(
               height: 44,
               child: ListView(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 children: [
-                  if (_onlyMine)
+                  if (_filter.onlyCustom)
                     Padding(
                       padding: const EdgeInsets.only(right: 6),
                       child: InputChip(
-                        label: const Text('My equipment'),
-                        onDeleted: () => setState(() => _onlyMine = false),
+                        label: const Text('Custom exercises'),
+                        onDeleted: () => setState(() => _filter = (
+                              equipment: _filter.equipment,
+                              muscles: _filter.muscles,
+                              onlyCustom: false,
+                            )),
                       ),
                     ),
-                  ..._equipment.map((e) => Padding(
+                  ..._filter.equipment.map((e) => Padding(
                         padding: const EdgeInsets.only(right: 6),
                         child: InputChip(
                           label: Text(pretty(e)),
-                          onDeleted: () => setState(() => _equipment.remove(e)),
+                          onDeleted: () =>
+                              setState(() => _filter.equipment.remove(e)),
                         ),
                       )),
-                  ..._muscles.map((m) => Padding(
+                  ..._filter.muscles.map((m) => Padding(
                         padding: const EdgeInsets.only(right: 6),
                         child: InputChip(
                           label: Text(pretty(m)),
-                          onDeleted: () => setState(() => _muscles.remove(m)),
+                          onDeleted: () =>
+                              setState(() => _filter.muscles.remove(m)),
                         ),
                       )),
                 ],
+              ),
+            ),
+          if (_query.isNotEmpty || active)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 2, 16, 0),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '${results.length} of ${ExerciseLibrary.all.length} shown',
+                  style: BvType.label,
+                ),
               ),
             ),
           Expanded(
@@ -171,6 +180,7 @@ class _ExercisePickerState extends State<ExercisePicker> {
                           [
                             if (ex.primaryLabel.isNotEmpty) ex.primaryLabel,
                             if (ex.equipmentLabel.isNotEmpty) ex.equipmentLabel,
+                            if (ex.custom) 'custom',
                           ].join(', '),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -195,86 +205,5 @@ class _ExercisePickerState extends State<ExercisePicker> {
         ],
       ),
     );
-  }
-
-  Future<void> _openFilters() async {
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (c) => StatefulBuilder(
-        builder: (c, setSheet) => DraggableScrollableSheet(
-          expand: false,
-          initialChildSize: 0.7,
-          builder: (c, scroll) => ListView(
-            controller: scroll,
-            padding: const EdgeInsets.all(16),
-            children: [
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                value: _onlyMine,
-                title: const Text('Only what I can do'),
-                subtitle: const Text(
-                    'Hides exercises needing gear not on your Equipment page'),
-                onChanged: (v) {
-                  setSheet(() {});
-                  setState(() => _onlyMine = v);
-                },
-              ),
-              const Divider(),
-              Text('Equipment', style: Theme.of(c).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 6,
-                runSpacing: 4,
-                children: ExerciseLibrary.equipmentCodes
-                    .map((code) => FilterChip(
-                          label: Text(pretty(code)),
-                          selected: _equipment.contains(code),
-                          onSelected: (v) {
-                            setSheet(() {});
-                            setState(() => v
-                                ? _equipment.add(code)
-                                : _equipment.remove(code));
-                          },
-                        ))
-                    .toList(),
-              ),
-              const SizedBox(height: 16),
-              Text('Muscle', style: Theme.of(c).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 6,
-                runSpacing: 4,
-                children: ExerciseLibrary.muscleCodes
-                    .map((code) => FilterChip(
-                          label: Text(pretty(code)),
-                          selected: _muscles.contains(code),
-                          onSelected: (v) {
-                            setSheet(() {});
-                            setState(() =>
-                                v ? _muscles.add(code) : _muscles.remove(code));
-                          },
-                        ))
-                    .toList(),
-              ),
-              const SizedBox(height: 16),
-              OutlinedButton.icon(
-                onPressed: () {
-                  setSheet(() {});
-                  setState(() {
-                    _equipment.clear();
-                    _muscles.clear();
-                    _onlyMine = false;
-                  });
-                },
-                icon: const Icon(Icons.clear_all),
-                label: const Text('Clear filters'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (mounted) setState(() {});
   }
 }

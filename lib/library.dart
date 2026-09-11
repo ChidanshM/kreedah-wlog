@@ -110,16 +110,12 @@ class ExerciseLibrary {
   static int countMatching({
     Set<String> equipment = const {},
     Set<String> muscles = const {},
-    bool onlyMyEquipment = false,
     bool onlyCustom = false,
-    Set<String> ownedEquipment = const {},
   }) =>
       search('',
               equipment: equipment,
               muscles: muscles,
-              onlyMyEquipment: onlyMyEquipment,
               onlyCustom: onlyCustom,
-              ownedEquipment: ownedEquipment,
               limit: 1 << 30)
           .length;
 
@@ -137,9 +133,7 @@ class ExerciseLibrary {
     String query, {
     Set<String> equipment = const {},
     Set<String> muscles = const {},
-    bool onlyMyEquipment = false,
     bool onlyCustom = false,
-    Set<String> ownedEquipment = const {},
     int limit = 400,
   }) {
     final q = query.trim().toLowerCase();
@@ -155,9 +149,6 @@ class ExerciseLibrary {
           !e.primary.any(muscles.contains) &&
           !e.secondary.any(muscles.contains)) {
         continue;
-      }
-      if (onlyMyEquipment && e.equipment.isNotEmpty) {
-        if (!e.equipment.every(ownedEquipment.contains)) continue;
       }
       if (terms.isNotEmpty) {
         final hay = e.name.toLowerCase();
