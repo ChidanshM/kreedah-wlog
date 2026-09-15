@@ -216,7 +216,8 @@ class Exporter {
   }
 
   /// [ref] is either a document URI from the chosen folder or a file path.
-  static Future<void> restoreFrom(String ref) async {
+  /// [only] restricts which tables are brought back.
+  static Future<int> restoreFrom(String ref, {Set<String>? only}) async {
     final raw = ref.startsWith('content://')
         ? await Saf.readFile(ref)
         : await File(ref).readAsString();
@@ -224,7 +225,7 @@ class Exporter {
     if (data['format'] != 'workout_log_backup') {
       throw const FormatException('Not a workout log backup file.');
     }
-    await Db.restore(data);
+    return Db.restore(data, only: only);
   }
 
   /// One file per session, in the shape the platform merges with Garmin.

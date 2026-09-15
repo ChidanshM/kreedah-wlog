@@ -10,6 +10,7 @@ import 'equipment_screen.dart';
 import 'export_sheet.dart';
 import 'guide_screen.dart';
 import 'library_screen.dart';
+import 'restore_screen.dart';
 import 'schedule_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -349,9 +350,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           ListTile(
             leading: const Icon(Icons.settings_backup_restore),
-            title: const Text('Restore from backup'),
-            subtitle: const Text('Replaces the current log'),
-            onTap: _restore,
+            title: const Text('Restore'),
+            subtitle: const Text('Bring back a backup, whole or in part'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () async {
+              await Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const RestoreScreen()));
+              await _load();
+            },
           ),
           const Divider(),
           ListTile(
@@ -370,10 +376,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Padding(
             padding: const EdgeInsets.fromLTRB(Bv.s4, Bv.s2, Bv.s4, Bv.s6),
             child: Text(
-              'Weight rule: kg is stored to 2 decimals and every summary '
-              'statistic is in kg. The screen keeps whatever unit you typed, '
-              'and the CSV carries an lb column filled in only for the sets '
-              'you actually entered in lb.',
+              'Weight rule: kilograms are stored exactly and every summary '
+              'figure is in kilograms. The screen keeps whatever unit you '
+              'typed, and the spreadsheet carries a pounds column filled in '
+              'only for the sets actually entered in pounds.',
               style: BvType.bodySm,
             ),
           ),

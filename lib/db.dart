@@ -1925,12 +1925,29 @@ class Db {
     'settings',
   ];
 
-  static Future<void> restore(Map<String, dynamic> data) async {
+  /// Bring a backup back in.
+  ///
+  /// [only] restricts it to particular tables, for restoring one part of a
+  /// backup without disturbing the rest. Whatever is restored is replaced
+  /// wholesale rather than merged: merging would mean deciding what happens
+  /// to a row that exists in both, and any answer to that quietly loses
+  /// something.
+  ///
+  /// Returns how many rows were written.
+  static Future<int> restore(
+    Map<String, dynamic> data, {
+    Set<String>? only,
+  }) async {
+    final tables =
+        backupTables.where((t) => only == null || only.contains(t)).toList();
+    if (tables.isEmpty) return 0;
+
+    var written = 0;
     await _db.transaction((txn) async {
-      for (final t in backupTables) {
+      for (final t in tables) {
         await txn.delete(t);
       }
-      for (final t in backupTables.reversed) {
+      for (final t in tables.reversed) {
         final rows = (data[t] as List?) ?? const [];
         if (rows.isEmpty) continue;
         final allowed = await _columnsOf(txn, t);
@@ -1943,6 +1960,7 @@ class Db {
           if (clean.isEmpty) continue;
           await txn.insert(t, clean,
               conflictAlgorithm: ConflictAlgorithm.replace);
+          written++;
         }
       }
     });
@@ -1953,6 +1971,7 @@ class Db {
     _primaryMuscles = null;
     final lookup = await primaryMuscles();
     await rebuildAllMuscleDays((k) => lookup[k] ?? const []);
+    return written;
   }
 
   /// Every confirmed set, flattened, for the CSV export.
