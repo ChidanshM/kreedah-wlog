@@ -1,19 +1,22 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
+import '../app_events.dart';
 import '../db.dart';
 import '../export.dart';
 import '../library.dart';
-import '../app_events.dart';
+import '../saf.dart';
 import '../theme.dart';
 import 'routine_import.dart';
 
 /// Everything that brings data in.
 ///
-/// Kept apart from exporting because the two are not symmetrical: exporting
-/// writes a file and changes nothing, while importing changes what is here.
-/// Split by what you are bringing in rather than by which file you have,
-/// since the two kinds behave differently — routines are added alongside
-/// what exists, a backup replaces it.
+/// Organised by what is arriving rather than by which file is at hand,
+/// because that is what someone knows: they want their equipment back, or
+/// their schedules, not a particular filename. Each leads to the system file
+/// picker, so the file can be anywhere — Downloads, a card, wherever a
+/// message left it — rather than only in the folder exports are written to.
 class ImportScreen extends StatefulWidget {
   const ImportScreen({super.key});
 
@@ -21,100 +24,19 @@ class ImportScreen extends StatefulWidget {
   State<ImportScreen> createState() => _ImportScreenState();
 }
 
-class _ImportScreenState extends State<ImportScreen> {
-  int _routineFiles = 0;
-  int _backups = 0;
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _count();
-  }
-
-  Future<void> _count() async {
-    final r = await Exporter.availableRoutineFiles();
-    final b = await Exporter.availableBackups();
-    if (!mounted) return;
-    setState(() {
-      _routineFiles = r.length;
-      _backups = b.length;
-      _loading = false;
-    });
-  }
-
-  String _found(int n, String what) => n == 0
-      ? 'None found'
-      : '$n file${n == 1 ? '' : 's'} of $what in the export folder';
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Import')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              children: [
-                ListTile(
-                  leading: const Icon(Icons.playlist_add),
-                  title: const Text('Routines'),
-                  subtitle: Text(
-                      '${_found(_routineFiles, 'routines')}\nAdded alongside '
-                      'what is already here. Nothing is replaced.'),
-                  isThreeLine: true,
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () async {
-                    await importRoutinesFlow(context);
-                    await _count();
-                  },
-                ),
-                const Divider(),
-                ListTile(
-                  leading: const Icon(Icons.settings_backup_restore),
-                  title: const Text('Restore from a backup'),
-                  subtitle: Text(
-                      '${_found(_backups, 'backups')}\nReplaces what is here, '
-                      'in whole or in part.'),
-                  isThreeLine: true,
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () async {
-                    await Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => const RestoreBackupScreen()));
-                    await _count();
-                  },
-                ),
-                const Divider(height: Bv.s5),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: Bv.s4),
-                  child: Text(
-                    'Files are read from the folder exports are written to, so '
-                    'anything copied in from a computer appears here. What a '
-                    'file is called does not matter: each one is read to see '
-                    'what it says it is.',
-                    style: BvType.bodySm,
-                  ),
-                ),
-              ],
-            ),
-    );
-  }
-}
-
-/// What a restore is allowed to touch.
-enum _Part { routines, sessions, equipment, exercises, schedules, settings }
+/// One part of a backup, restorable on its own.
+enum _Part { sessions, equipment, exercises, schedules, settings }
 
 extension on _Part {
   String get label => switch (this) {
-        _Part.routines => 'Routines',
         _Part.sessions => 'Logged sessions',
         _Part.equipment => 'Equipment',
-        _Part.exercises => 'Your own exercises',
+        _Part.exercises => 'Custom exercises',
         _Part.schedules => 'Schedules',
         _Part.settings => 'Settings',
       };
 
   String get detail => switch (this) {
-        _Part.routines => 'Plans, their exercises and per-set targets',
         _Part.sessions => 'Everything trained, with every set',
         _Part.equipment => 'The weights you own',
         _Part.exercises => 'Exercises you added by hand, and pins',
@@ -122,175 +44,204 @@ extension on _Part {
         _Part.settings => 'Export folder, timer preference',
       };
 
+  IconData get icon => switch (this) {
+        _Part.sessions => Icons.event_available_outlined,
+        _Part.equipment => Icons.fitness_center_outlined,
+        _Part.exercises => Icons.edit_note,
+        _Part.schedules => Icons.event_repeat_outlined,
+        _Part.settings => Icons.tune,
+      };
+
   /// Tables this part owns, children first.
-  List<String> get tables => switch (this) {
-        _Part.routines => ['routine_sets', 'routine_exercises', 'routines'],
-        _Part.sessions => ['sets', 'workout_exercises', 'workouts'],
-        _Part.equipment => ['equipment'],
-        _Part.exercises => ['pinned', 'custom_exercises'],
-        _Part.schedules => ['schedule'],
-        _Part.settings => ['settings'],
+  Set<String> get tables => switch (this) {
+        _Part.sessions => {'sets', 'workout_exercises', 'workouts'},
+        _Part.equipment => {'equipment'},
+        _Part.exercises => {'pinned', 'custom_exercises'},
+        _Part.schedules => {'schedule'},
+        _Part.settings => {'settings'},
       };
 }
 
-/// Restoring a backup: choose what it may touch, then which file.
-class RestoreBackupScreen extends StatefulWidget {
-  const RestoreBackupScreen({super.key});
+class _ImportScreenState extends State<ImportScreen> {
+  bool _busy = false;
 
-  @override
-  State<RestoreBackupScreen> createState() => _RestoreBackupScreenState();
-}
-
-class _RestoreBackupScreenState extends State<RestoreBackupScreen> {
-  List<({String name, String ref})> _files = const [];
-  bool _loading = true;
-  final _parts = {..._Part.values};
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final files = await Exporter.availableBackups();
+  void _say(String msg) {
     if (!mounted) return;
-    setState(() {
-      _files = files;
-      _loading = false;
-    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
-  bool get _everything => _parts.length == _Part.values.length;
+  /// Bring one part of a backup back.
+  ///
+  /// Everything except routines comes from a backup, since nothing else
+  /// carries it. What is restored replaces what is here rather than merging,
+  /// so it is confirmed first and the rest of the app is left untouched.
+  Future<void> _importPart(_Part part) async {
+    final file = await Saf.pickFile();
+    if (file == null || !mounted) return;
 
-  Future<void> _restore(({String name, String ref}) file) async {
-    if (_parts.isEmpty) return;
-
-    // Schedules point at routines, so restoring one without the other can
-    // leave a schedule with nothing to run. Said plainly rather than
-    // silently prevented.
-    final orphaned =
-        _parts.contains(_Part.schedules) && !_parts.contains(_Part.routines);
+    // Read before confirming, so a file that is not a backup is refused
+    // before anything is promised about replacing what is here.
+    Map<String, dynamic> data;
+    try {
+      final raw = await Saf.readFile(file.uri);
+      data = jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      _say('${file.name} could not be read as a backup.');
+      return;
+    }
+    if (data['format'] != 'workout_log_backup') {
+      _say('${file.name} is not a backup. ${part.label} lives only in one.');
+      return;
+    }
+    final rows = (data[part.tables.last] as List?)?.length ?? 0;
+    if (!mounted) return;
 
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: Text(_everything ? 'Replace everything?' : 'Restore some parts?'),
+        title: Text('Replace ${part.label.toLowerCase()}?'),
         content: Text(
-          _everything
-              ? 'Everything currently in the app is removed and replaced with '
-                  'what is in ${file.name}. This cannot be undone.'
-              : '${_parts.map((p) => p.label.toLowerCase()).join(', ')} '
-                  'will be replaced with what is in ${file.name}. Everything '
-                  'else is left as it is.'
-                  '${orphaned ? '\n\nSchedules refer to routines. Restoring them without routines may leave a schedule pointing at something that is not here.' : ''}',
-        ),
+            'The ${part.label.toLowerCase()} currently in the app are removed '
+            'and replaced with what is in ${file.name} — $rows record'
+            '${rows == 1 ? '' : 's'}. Everything else is left as it is.'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(c, false),
               child: const Text('Cancel')),
           FilledButton(
               onPressed: () => Navigator.pop(c, true),
-              child: const Text('Restore')),
+              child: const Text('Replace')),
         ],
       ),
     );
     if (ok != true) return;
 
+    setState(() => _busy = true);
     try {
-      final n = await Exporter.restoreFrom(
-        file.ref,
-        only: _everything ? null : {for (final p in _parts) ...p.tables},
-      );
+      final n = await Db.restore(data, only: part.tables);
       await ExerciseLibrary.load();
       notifyDataChanged();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Restored $n row${n == 1 ? '' : 's'}.')),
-      );
-      Navigator.of(context).pop();
+      _say('Brought back $n record${n == 1 ? '' : 's'}.');
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Restore failed: $e')));
-      }
+      _say('Import failed: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// The whole backup, replacing everything.
+  Future<void> _importAll() async {
+    final file = await Saf.pickFile();
+    if (file == null || !mounted) return;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Replace everything?'),
+        content: Text(
+            'Everything currently in the app is removed and replaced with '
+            'what is in ${file.name}. Anything logged since that backup was '
+            'made is lost. This cannot be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Replace everything')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    setState(() => _busy = true);
+    try {
+      final n = await Exporter.restoreFrom(file.uri);
+      await ExerciseLibrary.load();
+      notifyDataChanged();
+      _say('Restored $n record${n == 1 ? '' : 's'}.');
+    } catch (e) {
+      _say('Restore failed: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Restore from a backup')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.only(bottom: Bv.s6),
-              children: [
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(Bv.s4, Bv.s4, Bv.s4, Bv.s2),
-                  child: Text('WHAT TO BRING BACK', style: BvType.label),
-                ),
-                ..._Part.values.map((p) => CheckboxListTile(
-                      dense: true,
-                      value: _parts.contains(p),
-                      title: Text(p.label),
-                      subtitle: Text(p.detail, style: BvType.bodySm),
-                      onChanged: (v) => setState(
-                          () => v == true ? _parts.add(p) : _parts.remove(p)),
-                    )),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: Bv.s3),
-                  child: Row(
-                    children: [
-                      TextButton(
-                        onPressed: () =>
-                            setState(() => _parts.addAll(_Part.values)),
-                        child: const Text('All'),
-                      ),
-                      TextButton(
-                        onPressed: () => setState(_parts.clear),
-                        child: const Text('None'),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(),
-                Padding(
-                  padding:
-                      const EdgeInsets.fromLTRB(Bv.s4, Bv.s2, Bv.s4, Bv.s1),
-                  child: Text(
-                    _parts.isEmpty ? 'NOTHING SELECTED' : 'RESTORE FROM',
-                    style: BvType.label,
-                  ),
-                ),
-                if (_files.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(Bv.s4, 0, Bv.s4, 0),
-                    child: Text(
-                      'No backups found. They are read from the same folder '
-                      'exports are written to, so a file copied in from a '
-                      'computer appears here.',
-                      style: BvType.bodySm,
-                    ),
-                  ),
-                ..._files.map((f) => ListTile(
-                      enabled: _parts.isNotEmpty,
-                      leading: const Icon(Icons.settings_backup_restore),
-                      title: Text(f.name),
-                      onTap: () => _restore(f),
-                    )),
-                const Divider(height: Bv.s5),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: Bv.s4),
-                  child: Text(
-                    'Restoring replaces what is here rather than merging with '
-                    'it. Anything logged since the backup was made is lost, so '
-                    'export first if today matters.',
-                    style: BvType.bodySm,
-                  ),
-                ),
-              ],
+      appBar: AppBar(
+        title: const Text('Import'),
+        bottom: _busy
+            ? const PreferredSize(
+                preferredSize: Size.fromHeight(2),
+                child: LinearProgressIndicator(minHeight: 2),
+              )
+            : null,
+      ),
+      body: ListView(
+        padding: const EdgeInsets.only(bottom: Bv.s6),
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(Bv.s4, Bv.s4, Bv.s4, Bv.s2),
+            child: Text('ADDED TO WHAT IS HERE', style: BvType.label),
+          ),
+          ListTile(
+            enabled: !_busy,
+            leading: const Icon(Icons.playlist_add),
+            title: const Text('Routines'),
+            subtitle: const Text('Nothing is replaced. A name already in use '
+                'gains a suffix.'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _busy
+                ? null
+                : () async {
+                    await importRoutinesFlow(context);
+                  },
+          ),
+          const Divider(),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(Bv.s4, Bv.s3, Bv.s4, Bv.s1),
+            child: Text('REPLACED FROM A BACKUP', style: BvType.label),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(Bv.s4, 0, Bv.s4, Bv.s2),
+            child: Text(
+              'Each takes the matching part of a backup and leaves the rest '
+              'of the app alone.',
+              style: BvType.bodySm,
             ),
+          ),
+          ..._Part.values.map((p) => ListTile(
+                enabled: !_busy,
+                leading: Icon(p.icon),
+                title: Text(p.label),
+                subtitle: Text(p.detail),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: _busy ? null : () => _importPart(p),
+              )),
+          const Divider(),
+          ListTile(
+            enabled: !_busy,
+            leading: const Icon(Icons.settings_backup_restore),
+            title: const Text('Whole backup'),
+            subtitle: const Text('Replaces everything'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _busy ? null : _importAll,
+          ),
+          const Divider(height: Bv.s5),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Bv.s4),
+            child: Text(
+              'Each of these opens the phone\'s own file browser, so a file '
+              'can be anywhere rather than only in the export folder. What it '
+              'is called does not matter: it is read to see what it says it '
+              'is, and refused if it is the wrong kind.',
+              style: BvType.bodySm,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -25,6 +25,7 @@ class MainActivity : FlutterActivity() {
 
     private val channelName = "wlog/storage"
     private val pickRequest = 4711
+    private val pickFileRequest = 4712
     private var pending: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -37,6 +38,7 @@ class MainActivity : FlutterActivity() {
         try {
             when (call.method) {
                 "pickFolder" -> pickFolder(result)
+                "pickFile" -> pickFile(result)
                 "writeFile" -> writeFile(call, result)
                 "listFiles" -> listFiles(call, result)
                 "readFile" -> readFile(call, result)
@@ -75,9 +77,45 @@ class MainActivity : FlutterActivity() {
         startActivityForResult(intent, pickRequest)
     }
 
+    /**
+     * Opens the system file picker on a single document.
+     *
+     * Chosen over listing a folder because the file being imported need not
+     * live where exports are written: it may have arrived by message, sit in
+     * Downloads, or be on a card. The grant is not persisted, since it is
+     * wanted for one read rather than indefinitely.
+     *
+     * Returns the document's uri and its display name, so the screen can say
+     * which file it is working from.
+     */
+    private fun pickFile(result: MethodChannel.Result) {
+        pending = result
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            // Many providers label .json as octet-stream, so filtering on the
+            // json type alone hides files that are perfectly readable.
+            type = "*/*"
+            putExtra(
+                Intent.EXTRA_MIME_TYPES,
+                arrayOf("application/json", "text/plain", "application/octet-stream")
+            )
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivityForResult(intent, pickFileRequest)
+    }
+
+    /** The name a provider shows for a document, for telling the user. */
+    private fun displayName(uri: Uri): String {
+        contentResolver.query(uri, null, null, null, null)?.use { c ->
+            val i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+            if (i >= 0 && c.moveToFirst()) return c.getString(i) ?: "file"
+        }
+        return uri.lastPathSegment?.substringAfterLast('/') ?: "file"
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != pickRequest) return
+        if (requestCode != pickRequest && requestCode != pickFileRequest) return
         val result = pending ?: return
         pending = null
 
@@ -86,6 +124,12 @@ class MainActivity : FlutterActivity() {
             result.success(null)
             return
         }
+
+        if (requestCode == pickFileRequest) {
+            result.success(mapOf("uri" to uri.toString(), "name" to displayName(uri)))
+            return
+        }
+
         // Without this the grant dies with the activity and the folder is
         // forgotten the next time the app starts.
         contentResolver.takePersistableUriPermission(

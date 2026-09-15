@@ -12,6 +12,16 @@ class Saf {
   static Future<String?> pickFolder() =>
       _channel.invokeMethod<String>('pickFolder');
 
+  /// Opens the system file picker on one document.
+  ///
+  /// Used for importing, where the file may be anywhere: in Downloads, on a
+  /// card, or wherever a message put it. Returns null if cancelled.
+  static Future<({String uri, String name})?> pickFile() async {
+    final m = await _channel.invokeMapMethod<String, String>('pickFile');
+    if (m == null) return null;
+    return (uri: m['uri'] ?? '', name: m['name'] ?? 'file');
+  }
+
   /// Whether we still hold write access. A folder can become unreachable if
   /// the user revokes it, or if it lived on a card that has been removed.
   static Future<bool> hasAccess(String? tree) async {
