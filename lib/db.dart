@@ -978,6 +978,19 @@ class Db {
         .toList();
   }
 
+  /// Particular sessions, newest first. Used when exporting a selection
+  /// rather than a span.
+  static Future<List<Map<String, dynamic>>> workoutsByIds(List<int> ids) async {
+    if (ids.isEmpty) return const [];
+    final marks = List.filled(ids.length, '?').join(', ');
+    return (await _db.query('workouts',
+            where: 'id IN ($marks)',
+            whereArgs: ids,
+            orderBy: 'started_at DESC'))
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+  }
+
   /// Rename a session without unlinking it.
   ///
   /// Only the label changes; routine_id stays put, so the session still
@@ -1886,23 +1899,38 @@ class Db {
     return info.map((r) => r['name'] as String).toSet();
   }
 
+  /// Every table a backup carries, children first.
+  ///
+  /// Read in this order when clearing and in reverse when inserting, so a
+  /// parent always exists before anything points at it.
+  ///
+  /// This list was hand-written in two places and drifted: schedules and
+  /// per-set targets were added to the schema and never added here, so every
+  /// backup silently discarded them. One list now, used by both.
+  ///
+  /// muscle_day is deliberately absent. It is derived from the sessions, so
+  /// carrying it would be storing the same facts twice; it is rebuilt after
+  /// a restore instead.
+  static const backupTables = [
+    'sets',
+    'workout_exercises',
+    'workouts',
+    'routine_sets',
+    'routine_exercises',
+    'schedule',
+    'routines',
+    'equipment',
+    'custom_exercises',
+    'pinned',
+    'settings',
+  ];
+
   static Future<void> restore(Map<String, dynamic> data) async {
-    const tables = [
-      'sets',
-      'workout_exercises',
-      'workouts',
-      'routine_exercises',
-      'routines',
-      'equipment',
-      'custom_exercises',
-      'pinned',
-      'settings',
-    ];
     await _db.transaction((txn) async {
-      for (final t in tables) {
+      for (final t in backupTables) {
         await txn.delete(t);
       }
-      for (final t in tables.reversed) {
+      for (final t in backupTables.reversed) {
         final rows = (data[t] as List?) ?? const [];
         if (rows.isEmpty) continue;
         final allowed = await _columnsOf(txn, t);
@@ -1918,6 +1946,13 @@ class Db {
         }
       }
     });
+
+    // Derived from what was just restored, and not carried in the file.
+    // Without this the body map reads as nothing worked on a restored
+    // device.
+    _primaryMuscles = null;
+    final lookup = await primaryMuscles();
+    await rebuildAllMuscleDays((k) => lookup[k] ?? const []);
   }
 
   /// Every confirmed set, flattened, for the CSV export.
