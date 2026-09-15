@@ -103,7 +103,7 @@ class Db {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'workout_log.db'),
-      version: 9,
+      version: 10,
       onConfigure: (d) async {
         await d.execute('PRAGMA foreign_keys = ON');
       },
@@ -169,6 +169,23 @@ class Db {
         // v9: how much each muscle was worked, by day.
         if (from < 9) {
           await d.execute(_muscleDayTable);
+        }
+        // v10: the track exercise was registered against a muscle code that
+        // does not exist, so every interval session counted for nothing on
+        // the quadriceps while counting correctly for everything else. The
+        // row is only ever inserted if absent, so an existing one keeps the
+        // wrong value until corrected here.
+        if (from < 10) {
+          await d.update(
+            'custom_exercises',
+            {'p': 'QUADS,HAMSTRINGS,GLUTES,CALVES'},
+            where: 'k = ?',
+            whereArgs: [trackExerciseKey],
+          );
+          // The totals were computed from the bad code, so they are wrong
+          // for every day an interval session was logged.
+          await d.delete('settings',
+              where: 'k = ?', whereArgs: ['muscle_day_built_v1']);
         }
       },
       onCreate: (d, v) async {
@@ -493,6 +510,12 @@ class Db {
   /// Any custom exercise a routine refers to travels with it, otherwise the
   /// routine would arrive elsewhere pointing at something that does not
   /// exist there.
+  ///
+  /// Everything a routine holds travels too. An earlier version listed the
+  /// fields by hand and fell behind the schema, so whether sets differ from
+  /// one another, the rest between them, and the per-set values themselves
+  /// were all silently dropped: a routine carefully built as a drop set
+  /// arrived elsewhere as four identical sets with no rest.
   static Future<Map<String, dynamic>> routinesExport(List<int> ids) async {
     final routines = <Map<String, dynamic>>[];
     final customKeys = <String>{};
@@ -501,25 +524,42 @@ class Db {
       final found = await _db.query('routines', where: 'id = ?', whereArgs: [id]);
       if (found.isEmpty) continue;
       final exercises = await routineExercises(id);
+
+      final out = <Map<String, dynamic>>[];
       for (final e in exercises) {
         final k = e['ex_key'] as String;
         if (k.startsWith('CUSTOM/')) customKeys.add(k);
+
+        // Only the sets that actually depart from the shared target have a
+        // row, so this is empty for most exercises.
+        final overrides = await routineSetOverrides(e['id'] as int);
+
+        out.add({
+          'ex_key': e['ex_key'],
+          'ex_name': e['ex_name'],
+          'position': e['position'],
+          'set_type': e['set_type'],
+          'unilateral': e['unilateral'],
+          'unit': e['unit'],
+          'target_sets': e['target_sets'],
+          'per_set': e['per_set'],
+          'rest_sec': e['rest_sec'],
+          for (final f in targetFields) f: e[f],
+          if (overrides.isNotEmpty)
+            'sets': [
+              for (final entry in overrides.entries)
+                {
+                  'set_number': entry.key,
+                  'target_reps': entry.value['target_reps'],
+                  'target_weight': entry.value['target_weight'],
+                  'target_rpe': entry.value['target_rpe'],
+                  'rest_sec': entry.value['rest_sec'],
+                }
+            ],
+        });
       }
-      routines.add({
-        'name': found.first['name'],
-        'exercises': exercises
-            .map((e) => {
-                  'ex_key': e['ex_key'],
-                  'ex_name': e['ex_name'],
-                  'position': e['position'],
-                  'set_type': e['set_type'],
-                  'unilateral': e['unilateral'],
-                  'unit': e['unit'],
-                  'target_sets': e['target_sets'],
-                  for (final f in targetFields) f: e[f],
-                })
-            .toList(),
-      });
+
+      routines.add({'name': found.first['name'], 'exercises': out});
     }
 
     final customs = <Map<String, dynamic>>[];
@@ -530,7 +570,9 @@ class Db {
 
     return {
       'format': 'workout_log_routines',
-      'version': 1,
+      // 2 carries per-set values, rest, and whether sets differ. A file
+      // written before that is still read: the fields are simply absent.
+      'version': 2,
       'exported_at': isoLocal(DateTime.now()),
       'routines': routines,
       'custom_exercises': customs,
@@ -575,7 +617,7 @@ class Db {
         final key = ex['ex_key'];
         final label = ex['ex_name'];
         if (key is! String || label is! String) continue;
-        await addRoutineExercise(
+        final reId = await addRoutineExercise(
           newId,
           exKey: key,
           exName: label,
@@ -586,22 +628,38 @@ class Db {
           unit: ex['unit'] == 'lb' ? 'lb' : 'kg',
           targetSets: ((ex['target_sets'] as num?) ?? 3).toInt().clamp(1, 20),
         );
-        // Targets are optional and arbitrary numbers, so they are written
-        // after the row exists rather than widening the insert helper.
+
+        // Targets and the rest are optional and arbitrary numbers, so they
+        // are written after the row exists rather than widening the insert
+        // helper. The id comes back from the insert rather than being looked
+        // up afterwards, which was fragile.
         final patch = <String, Object?>{};
         for (final f in targetFields) {
           final v = ex[f];
           if (v is num) patch[f] = v;
         }
-        if (patch.isNotEmpty) {
-          final rows = await _db.query('routine_exercises',
-              where: 'routine_id = ?',
-              whereArgs: [newId],
-              orderBy: 'position DESC, id DESC',
-              limit: 1);
-          if (rows.isNotEmpty) {
-            await updateRoutineExercise(rows.first['id'] as int, patch);
-          }
+        if (ex['rest_sec'] is num) {
+          patch['rest_sec'] = (ex['rest_sec'] as num).toInt();
+        }
+        if (ex['per_set'] is num) {
+          patch['per_set'] = (ex['per_set'] as num).toInt() == 1 ? 1 : 0;
+        }
+        if (patch.isNotEmpty) await updateRoutineExercise(reId, patch);
+
+        // Values for individual sets. Absent in a file written before these
+        // were carried, which is why nothing here assumes they exist.
+        for (final s in (ex['sets'] as List? ?? const [])) {
+          if (s is! Map) continue;
+          final n = (s['set_number'] as num?)?.toInt();
+          if (n == null || n < 1) continue;
+          await setRoutineSetOverride(
+            reId,
+            n,
+            reps: (s['target_reps'] as num?)?.toInt(),
+            weight: (s['target_weight'] as num?)?.toDouble(),
+            rpe: (s['target_rpe'] as num?)?.toDouble(),
+            restSec: (s['rest_sec'] as num?)?.toInt(),
+          );
         }
       }
       added++;
@@ -888,7 +946,7 @@ class Db {
         'n': 'Track interval',
         'c': 'CUSTOM',
         'g': '',
-        'p': 'QUADRICEPS,HAMSTRINGS,GLUTES,CALVES',
+        'p': 'QUADS,HAMSTRINGS,GLUTES,CALVES',
         's': '',
         'e': '',
       },

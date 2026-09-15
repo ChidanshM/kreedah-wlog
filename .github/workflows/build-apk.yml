@@ -83,7 +83,7 @@ jobs:
           # not depend on, which produces a warning on every run.
           rm -f /tmp/app/analysis_options.yaml
           DIR='${{ steps.src.outputs.dir }}'
-          cp -r "$DIR/lib" "$DIR/assets" "$DIR/docs" "$DIR/pubspec.yaml" /tmp/app/
+          cp -r "$DIR/lib" "$DIR/assets" "$DIR/docs" "$DIR/test" "$DIR/pubspec.yaml" /tmp/app/
           # Source we do keep for the Android side, copied over the generated
           # tree. Currently MainActivity.kt, which carries the folder-picking
           # bridge. Everything else under android/ stays generated.
@@ -131,7 +131,16 @@ jobs:
         working-directory: /tmp/app
         run: dart run flutter_launcher_icons
 
-      # Runs first so compile errors show up as readable analyzer output
+      # Tests run before anything is built. None of them need a device: they
+      # cover the arithmetic, the muscle codes and the shape of the exercise
+      # data, which is where every silent mistake in this project has lived.
+      # A failure stops the build rather than shipping something known to be
+      # wrong.
+      - name: Test
+        working-directory: /tmp/app
+        run: flutter test --reporter expanded
+
+      # Runs early so compile errors show up as readable analyzer output
       # instead of a wall of Gradle noise.
       - name: Analyze
         working-directory: /tmp/app
