@@ -119,7 +119,7 @@ class BodyHeatmap extends StatelessWidget {
             gender: AnatomyGender.male,
             view: view,
             assetProvider:
-                const DefaultAnatomyProvider(style: AnatomyStyle.advanced),
+                const DefaultAnatomyProvider(style: AnatomyStyle.minimal),
             activeMuscles: active,
             muscleColors: colours,
             muscleIntensities: intensities,
@@ -138,19 +138,26 @@ class BodyHeatmap extends StatelessWidget {
     );
   }
 
+  /// With nothing logged there is no scale to describe, so the legend says
+  /// that rather than inventing endpoints: at a maximum of zero the least and
+  /// the most are the same figure, and colouring them anyway put red under
+  /// "least" and grey under "most".
   Widget _legend(int max) {
+    if (max == 0) {
+      return Text('Nothing logged in this span', style: BvType.label);
+    }
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         _swatch(Bv.sand400, 'None'),
         const SizedBox(width: Bv.s3),
-        _swatch(_colourFor(1, max == 0 ? 1 : max), 'Least'),
-        const SizedBox(width: Bv.s3),
-        _swatch(_colourFor(max, max == 0 ? 1 : max), 'Most'),
-        if (max > 0) ...[
+        _swatch(_colourFor(1, max), max == 1 ? 'Worked' : 'Least'),
+        if (max > 1) ...[
           const SizedBox(width: Bv.s3),
-          Text('$max sets', style: BvType.label),
+          _swatch(_colourFor(max, max), 'Most'),
         ],
+        const SizedBox(width: Bv.s3),
+        Text('$max sets', style: BvType.label),
       ],
     );
   }
