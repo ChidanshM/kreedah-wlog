@@ -61,8 +61,19 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
   /// One effort rating per side. The weaker side often works harder at the
   /// same load, which is the whole reason for logging sides separately.
   final _rpe = <int, double?>{};
+
+  /// Unit per set, not per exercise. The same cable exercise gets done on a
+  /// machine marked in pounds one day and one marked in kilograms the next,
+  /// so which it was belongs to the set. The exercise's unit is only the
+  /// default.
+  final _unit = <int, String>{};
+
   int _focusedRow = 0;
-  List<double> _chipWeights = const [];
+
+  /// Equipment weights exactly as recorded, each with its own unit. Never
+  /// converted: a converted chip enters a converted number, which is how
+  /// 32.5 kg became 71.65 lb in the log.
+  List<({double weight, String unit})> _chipWeights = const [];
 
   /// The rotating counter and the text field are two views of one value.
   /// `_fromWheel` breaks the feedback loop when one updates the other.
@@ -124,6 +135,7 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
       _weight[id] = TextEditingController(text: w == null ? '' : num2(w));
       _value[id] = TextEditingController(text: _valueText(r));
       _rpe[id] = (r['rpe'] as num?)?.toDouble();
+      _unit[id] = (r['entry_unit'] as String?) ?? widget.unit;
     }
     _focusedRow = widget.rows.first['id'] as int;
     _wheel = FixedExtentScrollController(
@@ -163,6 +175,11 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
 
   /// Quick-pick chips come from the weights on your Equipment page, narrowed
   /// to the kinds this exercise could actually use.
+  ///
+  /// Each keeps the unit it was recorded in. Converting them was the cause of
+  /// odd figures in the log: a stack marked 32.5 kg offered as 71.65 on a
+  /// pound exercise, and tapping it stored 71.65 rather than what the machine
+  /// actually said.
   Future<void> _loadChips() async {
     final ex = ExerciseLibrary.get(widget.exKey);
     final relevant = ex == null ? <String>[] : EquipKind.kindsFor(ex.equipment);
@@ -173,15 +190,19 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
         ? all
         : all.where((e) => relevant.contains(e['kind'])).toList();
 
-    final values = <double>{};
+    final seen = <String>{};
+    final list = <({double weight, String unit})>[];
     for (final e in pool) {
-      values.add(convertWeight(
-        (e['weight'] as num).toDouble(),
-        e['unit'] as String,
-        widget.unit,
-      ));
+      final w = (e['weight'] as num).toDouble();
+      final u = e['unit'] as String;
+      if (seen.add('$w$u')) list.add((weight: w, unit: u));
     }
-    final list = values.toList()..sort();
+    // The exercise's own unit first, so the usual machine leads.
+    list.sort((a, b) {
+      if (a.unit != b.unit) return a.unit == widget.unit ? -1 : 1;
+      return a.weight.compareTo(b.weight);
+    });
+
     if (!mounted) return;
     setState(() => _chipWeights = list);
   }
@@ -208,7 +229,9 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
       await Db.saveSet(
         id,
         setType: widget.setType,
-        unit: widget.unit,
+        // What the machine in front of you said, not what the exercise is
+        // configured as.
+        unit: _unit[id] ?? widget.unit,
         weightEntered: weight,
         reps: widget.setType == SetType.reps ? value : null,
         durationSec: widget.setType == SetType.time ? value : null,
@@ -238,18 +261,19 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
             ...widget.rows.map(_sideBlock),
             if (_chipWeights.isNotEmpty) ...[
               const SizedBox(height: 4),
-              Text('YOUR WEIGHTS (${widget.unit.toUpperCase()})',
-                  style: BvType.label),
+              Text('YOUR WEIGHTS', style: BvType.label),
               const SizedBox(height: 6),
               Wrap(
                 spacing: 6,
                 runSpacing: 4,
                 children: _chipWeights
-                    .map((w) => ActionChip(
-                          label: Text(num2(w)),
+                    .map((e) => ActionChip(
+                          label: Text('${num2(e.weight)} ${e.unit}'),
                           onPressed: () {
-                            _weight[_focusedRow]?.text = num2(w);
-                            setState(() {});
+                            // Takes the unit with it, so what is stored is
+                            // what the machine says.
+                            _weight[_focusedRow]?.text = num2(e.weight);
+                            setState(() => _unit[_focusedRow] = e.unit);
                           },
                         ))
                     .toList(),
@@ -426,7 +450,24 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
                     FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
                   ],
                   decoration: InputDecoration(
-                    labelText: 'Weight (${widget.unit})',
+                    labelText: 'Weight',
+                    // Tappable, because which machine you used is a property
+                    // of this set rather than of the exercise.
+                    suffix: InkWell(
+                      onTap: () => setState(() {
+                        _unit[id] = (_unit[id] ?? widget.unit) == 'kg'
+                            ? 'lb'
+                            : 'kg';
+                        _focusRow(id);
+                      }),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Text(
+                          (_unit[id] ?? widget.unit).toUpperCase(),
+                          style: BvType.label.copyWith(color: Bv.forest700),
+                        ),
+                      ),
+                    ),
                   ),
                   onTap: () => _focusRow(id),
                 ),
