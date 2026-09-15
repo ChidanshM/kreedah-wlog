@@ -78,7 +78,7 @@ class Db {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'workout_log.db'),
-      version: 7,
+      version: 8,
       onConfigure: (d) async {
         await d.execute('PRAGMA foreign_keys = ON');
       },
@@ -125,6 +125,21 @@ class Db {
         if (from < 7) {
           await d.execute(
               'ALTER TABLE routines ADD COLUMN archived INTEGER NOT NULL DEFAULT 0');
+        }
+        // v8: stored kilograms were rounded to two decimals, and volume was
+        // that rounded figure multiplied by the rep count, so the rounding
+        // error was multiplied too: 17.5 lb for twelve reps recorded 95.28
+        // where the true figure is 95.25. Both are recomputed from what was
+        // actually typed, which is exact and was never lost.
+        if (from < 8) {
+          await d.execute('''
+            UPDATE sets SET weight_kg = CASE entry_unit
+                WHEN 'lb' THEN weight_entered * $kLbToKg
+                ELSE weight_entered END
+            WHERE weight_entered IS NOT NULL''');
+          await d.execute('''
+            UPDATE sets SET volume_kg = weight_kg * reps
+            WHERE done = 1 AND weight_kg IS NOT NULL AND reps IS NOT NULL''');
         }
       },
       onCreate: (d, v) async {
@@ -1231,7 +1246,9 @@ class Db {
           'duration_sec': src?['duration_sec'],
           'distance_steps': src?['distance_steps'],
           'rpe': rpe,
-          'volume_kg': done ? double.parse(vol.toStringAsFixed(2)) : 0,
+          // Not rounded: rounding here and multiplying by the rep count
+          // multiplies the error. Display rounds instead.
+          'volume_kg': done ? vol : 0,
           'done': done ? 1 : 0,
           'ts': done ? stamp : null,
           'rest_sec': rest,
@@ -1295,7 +1312,9 @@ class Db {
     await batch.commit(noResult: true);
   }
 
-  /// Save one side of one set. Volume is always kg.
+  /// Save one side of one set. Volume is always kg, and is kept at full
+  /// precision: the rounding that belongs on screen does not belong in a
+  /// figure that gets summed across thirty sets.
   static Future<void> saveSet(
     int setId, {
     required String setType,
@@ -1320,7 +1339,7 @@ class Db {
         'duration_sec': durationSec,
         'distance_steps': distanceSteps,
         'rpe': rpe,
-        'volume_kg': double.parse(volume.toStringAsFixed(2)),
+        'volume_kg': volume,
         'done': done ? 1 : 0,
         'ts': done ? isoLocal(DateTime.now()) : null,
       },
@@ -1344,8 +1363,7 @@ class Db {
         final kg = (s['weight_kg'] as num?)?.toDouble();
         final reps = s['reps'] as int?;
         final vol = (kg != null && reps != null) ? kg * reps : 0.0;
-        await _db.update('sets',
-            {'volume_kg': double.parse(vol.toStringAsFixed(2))},
+        await _db.update('sets', {'volume_kg': vol},
             where: 'id = ?', whereArgs: [setId]);
       }
     }

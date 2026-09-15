@@ -1,22 +1,30 @@
 /// Unit conversion, date formatting and small shared helpers.
 ///
 /// Unit rule for this app:
-///   * kg is the canonical stored value, always rounded to 2 decimals.
+///   * kg is the canonical stored value, kept at full precision.
 ///   * The screen always shows the unit you actually typed.
 ///   * Every summary statistic (session volume, set volume, tonnage, PRs)
-///     is kg only.
+///     is kg only, and rounds only when displayed.
 library;
 
 const double kLbToKg = 0.45359237;
 const double kKgToLb = 1 / kLbToKg;
 
-/// Convert an entered weight to canonical kg, rounded to 2 decimals.
-double toKg(double value, String unit) {
-  final kg = unit == 'lb' ? value * kLbToKg : value;
-  return double.parse(kg.toStringAsFixed(2));
-}
+/// Convert an entered weight to canonical kg, at full precision.
+///
+/// Deliberately not rounded. Rounding here and then multiplying by the rep
+/// count multiplies the rounding error too: 17.5 lb kept as 7.94 gives a
+/// twelve rep set a volume of 95.28 kg, where converting the whole set at
+/// once gives 95.25. Keeping the full value makes those agree, and keeps
+/// volume divided by reps equal to the stored weight, which is what makes
+/// the figures check out against each other.
+double toKg(double value, String unit) =>
+    unit == 'lb' ? value * kLbToKg : value;
 
-/// Convert canonical kg back into a display unit (used for quick-pick chips).
+/// Convert canonical kg back into a display unit, rounded for reading.
+///
+/// Safe to round here because the value it starts from is exact: 17.5 lb
+/// stored precisely comes back as 17.5, not 17.49.
 double fromKg(double kg, String unit) {
   final v = unit == 'lb' ? kg * kKgToLb : kg;
   return double.parse(v.toStringAsFixed(2));
