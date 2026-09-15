@@ -57,6 +57,7 @@ class BodyHeatmap extends StatelessWidget {
               regions: regions,
               counts: counts,
               max: max,
+              textScale: w / 100,
             ),
           ),
         ),
@@ -122,11 +123,15 @@ class _BodyPainter extends CustomPainter {
     required this.regions,
     required this.counts,
     required this.max,
+    required this.textScale,
   });
 
   final Map<String, List<Rect>> regions;
   final Map<String, int> counts;
   final int max;
+
+  /// Figures scale with the drawing, but stop shrinking below legibility.
+  final double textScale;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -153,8 +158,9 @@ class _BodyPainter extends CustomPainter {
     );
 
     for (final entry in regions.entries) {
+      final count = counts[entry.key] ?? 0;
       final fill = Paint()
-        ..color = _colourFor(counts[entry.key] ?? 0, max)
+        ..color = _colourFor(count, max)
         ..style = PaintingStyle.fill;
 
       for (final r in entry.value) {
@@ -174,13 +180,52 @@ class _BodyPainter extends CustomPainter {
         final rr = RRect.fromRectAndRadius(scaled, radius);
         canvas.drawRRect(rr, fill);
         canvas.drawRRect(rr, outline);
+
+        // The figure itself, so a shade can be read as a number rather than
+        // only compared against its neighbours. Nothing is drawn for zero:
+        // grey already says that, and a nought on every unworked region is
+        // noise across half the body.
+        if (count > 0) _drawCount(canvas, scaled, count);
       }
     }
   }
 
+  void _drawCount(Canvas canvas, Rect box, int count) {
+    final size = (9.0 * textScale).clamp(9.0, 13.0);
+    // A pair of shapes for one muscle would otherwise each claim the full
+    // count, so the figure only goes where it fits.
+    if (box.width < size * 1.6 || box.height < size * 1.3) return;
+
+    final tp = TextPainter(
+      text: TextSpan(
+        text: '$count',
+        style: TextStyle(
+          fontSize: size,
+          fontWeight: FontWeight.w600,
+          // Dark on the pale end of the scale, light on the hot end, so the
+          // figure stays readable the whole way along it.
+          color: Bv.cream100,
+          height: 1,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+
+    tp.paint(
+      canvas,
+      Offset(
+        box.center.dx - tp.width / 2,
+        box.center.dy - tp.height / 2,
+      ),
+    );
+  }
+
   @override
   bool shouldRepaint(_BodyPainter old) =>
-      old.counts != counts || old.max != max || old.regions != regions;
+      old.counts != counts ||
+      old.max != max ||
+      old.regions != regions ||
+      old.textScale != textScale;
 }
 
 /// Each muscle is one or two rects in a 100 x 220 space, mirrored left and
