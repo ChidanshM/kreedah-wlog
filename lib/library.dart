@@ -110,12 +110,18 @@ class ExerciseLibrary {
   static int countMatching({
     Set<String> equipment = const {},
     Set<String> muscles = const {},
+    Set<String> bodyParts = const {},
     bool onlyCustom = false,
+    Set<String> doneKeys = const {},
+    bool onlyDone = false,
   }) =>
       search('',
               equipment: equipment,
               muscles: muscles,
+              bodyParts: bodyParts,
               onlyCustom: onlyCustom,
+              doneKeys: doneKeys,
+              onlyDone: onlyDone,
               limit: 1 << 30)
           .length;
 
@@ -133,21 +139,34 @@ class ExerciseLibrary {
     String query, {
     Set<String> equipment = const {},
     Set<String> muscles = const {},
+    Set<String> bodyParts = const {},
     bool onlyCustom = false,
+    /// Keys that have been logged at least once. Empty set with
+    /// [onlyDone] true means nothing matches, which is correct.
+    Set<String> doneKeys = const {},
+    bool onlyDone = false,
     int limit = 400,
   }) {
     final q = query.trim().toLowerCase();
     final terms = q.isEmpty ? const <String>[] : q.split(RegExp(r'\s+'));
 
+    // A body part is just a coarser way of naming muscles, so it collapses
+    // into the same test rather than being a second kind of filter.
+    final wanted = <String>{
+      ...muscles,
+      ...BodyPart.musclesFor(bodyParts),
+    };
+
     final results = <Exercise>[];
     for (final e in all) {
       if (onlyCustom && !e.custom) continue;
+      if (onlyDone && !doneKeys.contains(e.key)) continue;
       if (equipment.isNotEmpty && !e.equipment.any(equipment.contains)) {
         continue;
       }
-      if (muscles.isNotEmpty &&
-          !e.primary.any(muscles.contains) &&
-          !e.secondary.any(muscles.contains)) {
+      if (wanted.isNotEmpty &&
+          !e.primary.any(wanted.contains) &&
+          !e.secondary.any(wanted.contains)) {
         continue;
       }
       if (terms.isNotEmpty) {

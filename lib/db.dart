@@ -1462,6 +1462,113 @@ class Db {
     };
   }
 
+  /// Totals per exercise across everything logged.
+  ///
+  /// Keyed by exercise so the library can say how much work each has taken,
+  /// order by it, and tell apart the exercises you actually do from the
+  /// fifteen hundred you have merely got installed.
+  static Future<Map<String, ({int sets, double volume, String? last})>>
+      exerciseTotals() async {
+    final r = await _db.rawQuery('''
+      SELECT we.ex_key k,
+             COUNT(s.id) n,
+             COALESCE(SUM(s.volume_kg), 0) v,
+             MAX(w.started_at) last
+      FROM sets s
+      JOIN workout_exercises we ON s.we_id = we.id
+      JOIN workouts w ON we.workout_id = w.id
+      WHERE s.done = 1 AND w.ended_at IS NOT NULL
+      GROUP BY we.ex_key''');
+
+    return {
+      for (final row in r)
+        (row['k'] as String): (
+          sets: ((row['n'] as num?) ?? 0).toInt(),
+          volume: ((row['v'] as num?) ?? 0).toDouble(),
+          last: row['last'] as String?,
+        )
+    };
+  }
+
+  /// Every confirmed set of one exercise, ranked.
+  ///
+  /// Three orderings, because "best" is three different questions:
+  ///   * volume  — most work in one set, which a light high-rep set can win
+  ///   * weight  — heaviest load, ties broken by who did more reps with it
+  ///   * reps    — most repetitions, ties broken by who did them heavier
+  ///
+  /// [fromIso] narrows to a window. Sessions are compared on their start,
+  /// which is a local timestamp: correct within one timezone, and a session
+  /// entered after the fact carries the date it is dated rather than a time
+  /// anything observed.
+  static Future<List<Map<String, dynamic>>> exerciseHistory(
+    String exKey, {
+    String? fromIso,
+    String order = 'volume',
+    int limit = 200,
+  }) async {
+    final where = <String>['we.ex_key = ?', 's.done = 1', 'w.ended_at IS NOT NULL'];
+    final args = <Object?>[exKey];
+    if (fromIso != null) {
+      where.add('w.started_at >= ?');
+      args.add(fromIso);
+    }
+
+    final by = switch (order) {
+      'weight' => 's.weight_kg DESC, s.reps DESC',
+      'reps' => 's.reps DESC, s.weight_kg DESC',
+      _ => 's.volume_kg DESC, s.weight_kg DESC',
+    };
+
+    return (await _db.rawQuery('''
+      SELECT s.id, s.set_number, s.side, s.entry_unit, s.weight_entered,
+             s.weight_kg, s.reps, s.duration_sec, s.distance_m, s.rpe,
+             s.volume_kg, s.ts,
+             w.id AS workout_id, w.started_at, w.routine_name, w.time_known
+      FROM sets s
+      JOIN workout_exercises we ON s.we_id = we.id
+      JOIN workouts w ON we.workout_id = w.id
+      WHERE ${where.join(' AND ')}
+      ORDER BY $by
+      LIMIT ?''', [...args, limit]))
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+  }
+
+  /// Bests and counts for one exercise over a window.
+  static Future<
+      ({
+        double? topVolume,
+        double? topWeight,
+        int? topReps,
+        int sets,
+        int sessions,
+      })> exerciseBests(String exKey, {String? fromIso}) async {
+    final where = <String>['we.ex_key = ?', 's.done = 1', 'w.ended_at IS NOT NULL'];
+    final args = <Object?>[exKey];
+    if (fromIso != null) {
+      where.add('w.started_at >= ?');
+      args.add(fromIso);
+    }
+
+    final r = await _db.rawQuery('''
+      SELECT MAX(s.volume_kg) v, MAX(s.weight_kg) w, MAX(s.reps) r,
+             COUNT(s.id) n, COUNT(DISTINCT w.id) d
+      FROM sets s
+      JOIN workout_exercises we ON s.we_id = we.id
+      JOIN workouts w ON we.workout_id = w.id
+      WHERE ${where.join(' AND ')}''', args);
+
+    final row = r.first;
+    return (
+      topVolume: (row['v'] as num?)?.toDouble(),
+      topWeight: (row['w'] as num?)?.toDouble(),
+      topReps: (row['r'] as num?)?.toInt(),
+      sets: ((row['n'] as num?) ?? 0).toInt(),
+      sessions: ((row['d'] as num?) ?? 0).toInt(),
+    );
+  }
+
   /// Heaviest confirmed kg ever recorded for an exercise.
   static Future<double?> bestKg(String exKey) async {
     final r = await _db.rawQuery('''

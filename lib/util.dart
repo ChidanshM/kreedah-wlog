@@ -218,6 +218,101 @@ String? targetLabel({
   return 'Target ${parts.join(', ')}';
 }
 
+/// Muscles in anatomical order, head to toe.
+///
+/// The data lists them alphabetically, which puts calves before chest and
+/// teaches you nothing. Ordering them down the body means a list of muscles
+/// reads like a body rather than like an index.
+const muscleOrder = <String>[
+  'NECK',
+  'TRAPS',
+  'SHOULDERS',
+  'CHEST',
+  'LATS',
+  'UPPER_BACK',
+  'MIDDLE_BACK',
+  'BICEPS',
+  'TRICEPS',
+  'FOREARM',
+  'CORE',
+  'ABS',
+  'OBLIQUES',
+  'LOWER_BACK',
+  'HIPS',
+  'GLUTES',
+  'ABDUCTORS',
+  'ADDUCTORS',
+  'QUADS',
+  'HAMSTRINGS',
+  'CALVES',
+  'SHINS',
+];
+
+/// Where an unlisted code sorts: after everything known, alphabetically
+/// among themselves, so a code added to the data later is never lost.
+int muscleRank(String code) {
+  final i = muscleOrder.indexOf(code);
+  return i == -1 ? muscleOrder.length : i;
+}
+
+List<String> sortMuscles(Iterable<String> codes) {
+  final list = codes.toList()
+    ..sort((a, b) {
+      final r = muscleRank(a).compareTo(muscleRank(b));
+      return r != 0 ? r : a.compareTo(b);
+    });
+  return list;
+}
+
+/// The part of the body a muscle belongs to.
+///
+/// A coarser grouping than the muscle codes, because "show me arm work" is a
+/// more natural question than "show me biceps or triceps or forearm work".
+/// Listed head to toe like the muscles themselves.
+class BodyPart {
+  static const neck = 'Neck';
+  static const shoulders = 'Shoulders';
+  static const chest = 'Chest';
+  static const back = 'Back';
+  static const arms = 'Arms';
+  static const core = 'Core';
+  static const hips = 'Hips and glutes';
+  static const legs = 'Legs';
+
+  /// In the order they appear down the body.
+  static const all = [neck, shoulders, chest, back, arms, core, hips, legs];
+
+  static const muscles = <String, List<String>>{
+    neck: ['NECK'],
+    shoulders: ['SHOULDERS', 'TRAPS'],
+    chest: ['CHEST'],
+    back: ['LATS', 'UPPER_BACK', 'MIDDLE_BACK', 'LOWER_BACK'],
+    arms: ['BICEPS', 'TRICEPS', 'FOREARM'],
+    core: ['CORE', 'ABS', 'OBLIQUES'],
+    hips: ['HIPS', 'GLUTES', 'ABDUCTORS', 'ADDUCTORS'],
+    legs: ['QUADS', 'HAMSTRINGS', 'CALVES', 'SHINS'],
+  };
+
+  /// Trapezius sits with the shoulders and the lower back with the back,
+  /// which is arguable either way; both are placed where someone looking for
+  /// them would look first.
+  static String? forMuscle(String code) {
+    for (final e in muscles.entries) {
+      if (e.value.contains(code)) return e.key;
+    }
+    return null;
+  }
+
+  /// Every muscle code covered by a set of parts.
+  static Set<String> musclesFor(Iterable<String> parts) {
+    final out = <String>{};
+    for (final p in parts) {
+      out.addAll(muscles[p] ?? const []);
+    }
+    return out;
+  }
+}
+
 /// The categories you add weights under on the Equipment page. Each one maps
 /// to the Garmin equipment codes it can satisfy, so the weight quick-pick
 /// chips know which of your weights are relevant to the exercise in front of
