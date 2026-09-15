@@ -1489,6 +1489,90 @@ class Db {
     };
   }
 
+  // ------------------------------------------------------------ muscle work
+
+  /// Recompute the muscle totals for the days a session covers.
+  ///
+  /// Called when a session is finished, edited or removed, so the stored
+  /// totals only ever change when the underlying training does. Which
+  /// muscles an exercise works comes from the exercise data rather than any
+  /// table, so the grouping happens here rather than in SQL.
+  ///
+  /// [muscleLookup] maps an exercise key to its primary muscle codes.
+  /// Secondary muscles are deliberately not counted: they appear far more
+  /// often than primary ones, so counting them unweighted would leave
+  /// hamstrings permanently the hottest thing on the map.
+  static Future<void> recomputeMuscleDays(
+    Iterable<String> days,
+    List<String> Function(String exKey) muscleLookup,
+  ) async {
+    for (final day in days) {
+      final rows = await _db.rawQuery('''
+        SELECT we.ex_key k, s.reps reps, s.volume_kg vol
+        FROM sets s
+        JOIN workout_exercises we ON s.we_id = we.id
+        JOIN workouts w ON we.workout_id = w.id
+        WHERE s.done = 1 AND w.ended_at IS NOT NULL
+          AND substr(w.started_at, 1, 10) = ?''', [day]);
+
+      final sets = <String, int>{};
+      final reps = <String, int>{};
+      final vol = <String, double>{};
+
+      for (final r in rows) {
+        for (final m in muscleLookup(r['k'] as String)) {
+          sets[m] = (sets[m] ?? 0) + 1;
+          reps[m] = (reps[m] ?? 0) + ((r['reps'] as int?) ?? 0);
+          vol[m] = (vol[m] ?? 0) + ((r['vol'] as num?)?.toDouble() ?? 0);
+        }
+      }
+
+      final batch = _db.batch();
+      batch.delete('muscle_day', where: 'day = ?', whereArgs: [day]);
+      for (final m in sets.keys) {
+        batch.insert('muscle_day', {
+          'day': day,
+          'muscle': m,
+          'sets': sets[m],
+          'reps': reps[m] ?? 0,
+          'volume_kg': vol[m] ?? 0,
+        });
+      }
+      await batch.commit(noResult: true);
+    }
+  }
+
+  /// The days a session touches, for invalidating just those.
+  static Future<List<String>> daysOfWorkout(int workoutId) async {
+    final r = await _db.rawQuery(
+        'SELECT substr(started_at, 1, 10) d FROM workouts WHERE id = ?',
+        [workoutId]);
+    return r.map((e) => e['d'] as String).whereType<String>().toList();
+  }
+
+  /// Sets per muscle between two dates, inclusive of both.
+  static Future<Map<String, int>> muscleSets(
+      DateTime from, DateTime to) async {
+    final r = await _db.rawQuery('''
+      SELECT muscle, SUM(sets) n FROM muscle_day
+      WHERE day >= ? AND day <= ?
+      GROUP BY muscle''', [ymd(from), ymd(to)]);
+    return {
+      for (final row in r) (row['muscle'] as String): ((row['n'] as num).toInt())
+    };
+  }
+
+  /// Rebuild every day from scratch. Needed once after the table is created,
+  /// and after a restore, since a backup carries sessions but not this.
+  static Future<void> rebuildAllMuscleDays(
+      List<String> Function(String exKey) muscleLookup) async {
+    final r = await _db.rawQuery('''
+      SELECT DISTINCT substr(started_at, 1, 10) d FROM workouts
+      WHERE ended_at IS NOT NULL''');
+    await recomputeMuscleDays(
+        r.map((e) => e['d'] as String).toList(), muscleLookup);
+  }
+
   /// Totals per exercise across everything logged.
   ///
   /// Keyed by exercise so the library can say how much work each has taken,
