@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../db.dart';
 import '../export.dart';
-import '../library.dart';
 import '../saf.dart';
 import '../theme.dart';
 import 'body_heatmap_screen.dart';
@@ -181,76 +180,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
     } finally {
       if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _restore() async {
-    final backups = await Exporter.availableBackups();
-    if (!mounted) return;
-    if (backups.isEmpty) {
-      showDialog(
-        context: context,
-        builder: (c) => AlertDialog(
-          title: const Text('No backups found'),
-          content: Text(_tree == null
-              ? 'Choose an export folder first, then put a backup file in it.'
-              : 'No .json backup in $_folderLabel. Put one there and try again.'),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(c), child: const Text('OK')),
-          ],
-        ),
-      );
-      return;
-    }
-
-    final chosen = await showModalBottomSheet<String>(
-      context: context,
-      builder: (c) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: backups
-              .map((b) => ListTile(
-                    leading: const Icon(Icons.restore_page_outlined),
-                    title: Text(b.name),
-                    onTap: () => Navigator.pop(c, b.ref),
-                  ))
-              .toList(),
-        ),
-      ),
-    );
-    if (chosen == null || !mounted) return;
-
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Replace everything?'),
-        content: const Text(
-            'Restoring wipes the current log and replaces it with the backup.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Restore')),
-        ],
-      ),
-    );
-    if (ok != true) return;
-
-    try {
-      await Exporter.restoreFrom(chosen);
-      await ExerciseLibrary.load();
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Restored.')));
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Restore failed: $e')));
-      }
     }
   }
 
