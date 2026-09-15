@@ -1,30 +1,84 @@
 import 'package:flutter/material.dart';
+import 'package:muscle_mapper/muscle_mapper.dart';
 
 import '../theme.dart';
-import '../util.dart';
 
 /// Front and back views with each muscle shaded by how much it was worked.
 ///
-/// The shapes are schematic — recognisable regions in roughly the right
-/// places, not anatomy. They are drawn in code against a fixed 100 x 220
-/// coordinate space per body and scaled to fit, so replacing them later with
-/// a properly drawn asset means swapping [_frontRegions] and [_backRegions]
-/// and nothing else.
-///
-/// Seventeen regions, matching the seventeen muscle codes the exercise data
-/// uses. Anything finer would imply a distinction the data cannot fill.
+/// This branch draws them with the muscle_mapper package, which ships the
+/// anatomical drawings and does its own hit testing. Colour and intensity are
+/// still this app's: the package takes a colour and an opacity per muscle
+/// rather than imposing a scale.
 class BodyHeatmap extends StatelessWidget {
-  const BodyHeatmap({super.key, required this.counts});
+  const BodyHeatmap({super.key, required this.counts, this.onMuscleTapped});
 
   /// Sets per muscle code over whatever window the caller chose.
   final Map<String, int> counts;
 
+  /// Called with one of this app's muscle codes, not the package's.
+  final void Function(String muscleCode)? onMuscleTapped;
+
+  /// This app records against seventeen codes; the package draws thirty-five
+  /// sub-muscles grouped into twenty. Mapping is to the group, since a set is
+  /// never recorded against one head of a muscle.
+  ///
+  /// Two have no home. Hip flexors are drawn here as the groin group, which
+  /// is where they sit anatomically whatever the name suggests. Abductors
+  /// have nothing: the muscle that does the work is inside the glutes group,
+  /// so counting it there would overstate glute work.
+  static const _groups = <String, MuscleGroup>{
+    'TRAPS': MuscleGroup.traps,
+    'SHOULDERS': MuscleGroup.deltoids,
+    'CHEST': MuscleGroup.chest,
+    'LATS': MuscleGroup.lats,
+    'LOWER_BACK': MuscleGroup.lowerBack,
+    'BICEPS': MuscleGroup.biceps,
+    'TRICEPS': MuscleGroup.triceps,
+    'FOREARM': MuscleGroup.forearms,
+    'ABS': MuscleGroup.abs,
+    'OBLIQUES': MuscleGroup.obliques,
+    'HIPS': MuscleGroup.groin,
+    'GLUTES': MuscleGroup.glutes,
+    'ADDUCTORS': MuscleGroup.innerThigh,
+    'QUADS': MuscleGroup.quads,
+    'HAMSTRINGS': MuscleGroup.hamstrings,
+    'CALVES': MuscleGroup.calves,
+  };
+
+  /// The reverse, for turning a tap back into something this app knows.
+  static String? _codeFor(Muscle m) {
+    final group = m.group;
+    for (final e in _groups.entries) {
+      if (e.value == group) return e.key;
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final max = counts.values.fold<int>(0, (a, b) => a > b ? a : b);
+
+    final active = <Muscle>{};
+    final colours = <Muscle, Color>{};
+    final intensities = <Muscle, double>{};
+
+    counts.forEach((code, count) {
+      final group = _groups[code];
+      if (group == null || count <= 0) return;
+      final colour = _colourFor(count, max);
+      // Opacity carries the same information as hue here. Kept near the top
+      // of its range so a lightly worked muscle is still clearly coloured
+      // rather than washed out against the base drawing.
+      final t = max <= 1 ? 1.0 : (count - 1) / (max - 1);
+      for (final m in group.subMuscles) {
+        active.add(m);
+        colours[m] = colour;
+        intensities[m] = 0.55 + 0.45 * t;
+      }
+    });
+
     return LayoutBuilder(
       builder: (context, box) {
-        // Two bodies side by side, each keeping its 100:220 proportion.
         final w = (box.maxWidth - Bv.s4) / 2;
         final h = w * 2.2;
         return Column(
@@ -32,9 +86,11 @@ class BodyHeatmap extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _view(w, h, _frontRegions, 'Front', max),
+                _view(w, h, AnatomyView.front, 'Front', active, colours,
+                    intensities),
                 const SizedBox(width: Bv.s4),
-                _view(w, h, _backRegions, 'Back', max),
+                _view(w, h, AnatomyView.back, 'Back', active, colours,
+                    intensities),
               ],
             ),
             const SizedBox(height: Bv.s3),
@@ -45,20 +101,35 @@ class BodyHeatmap extends StatelessWidget {
     );
   }
 
-  Widget _view(double w, double h, Map<String, List<Rect>> regions,
-      String label, int max) {
+  Widget _view(
+    double w,
+    double h,
+    AnatomyView view,
+    String label,
+    Set<Muscle> active,
+    Map<Muscle, Color> colours,
+    Map<Muscle, double> intensities,
+  ) {
     return Column(
       children: [
         SizedBox(
           width: w,
           height: h,
-          child: CustomPaint(
-            painter: _BodyPainter(
-              regions: regions,
-              counts: counts,
-              max: max,
-              textScale: w / 100,
-            ),
+          child: MuscleMapper(
+            gender: AnatomyGender.male,
+            view: view,
+            assetProvider:
+                const DefaultAnatomyProvider(style: AnatomyStyle.advanced),
+            activeMuscles: active,
+            muscleColors: colours,
+            muscleIntensities: intensities,
+            baseColor: Bv.sand400,
+            onMuscleTapped: onMuscleTapped == null
+                ? null
+                : (m) {
+                    final code = _codeFor(m);
+                    if (code != null) onMuscleTapped!(code);
+                  },
           ),
         ),
         const SizedBox(height: Bv.s1),
@@ -67,15 +138,11 @@ class BodyHeatmap extends StatelessWidget {
     );
   }
 
-  /// Grey means nothing logged, which is different from a little logged.
-  /// Blue to red spans least to most, anchored to your own hardest-worked
-  /// muscle rather than to a fixed number, since what counts as a lot depends
-  /// entirely on the routine.
   Widget _legend(int max) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        _swatch(_colourFor(0, max), 'None'),
+        _swatch(Bv.sand400, 'None'),
         const SizedBox(width: Bv.s3),
         _swatch(_colourFor(1, max == 0 ? 1 : max), 'Least'),
         const SizedBox(width: Bv.s3),
@@ -105,13 +172,9 @@ class BodyHeatmap extends StatelessWidget {
       );
 }
 
-/// Nothing logged stays grey. Everything else runs yellow through orange to
-/// red across the range actually present, so the scale always uses its full
-/// span.
-///
-/// A single hue would only vary in lightness, which the eye reads as depth
-/// rather than as quantity. Yellow to red is the ramp used for heat and for
-/// height, and it reads in one direction without needing the legend.
+/// Yellow through orange to red across the range actually present, so the
+/// scale always uses its full span. Nothing logged is left to the base
+/// drawing rather than given a colour of its own.
 Color _colourFor(int count, int max) {
   if (count <= 0) return Bv.sand400;
   if (max <= 1) return const Color(0xFFD7342A);
@@ -125,203 +188,3 @@ Color _colourFor(int count, int max) {
       ? Color.lerp(low, mid, t * 2)!
       : Color.lerp(mid, high, (t - 0.5) * 2)!;
 }
-
-class _BodyPainter extends CustomPainter {
-  _BodyPainter({
-    required this.regions,
-    required this.counts,
-    required this.max,
-    required this.textScale,
-  });
-
-  final Map<String, List<Rect>> regions;
-  final Map<String, int> counts;
-  final int max;
-
-  /// Figures scale with the drawing, but stop shrinking below legibility.
-  final double textScale;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final sx = size.width / 100;
-    final sy = size.height / 220;
-
-    final outline = Paint()
-      ..color = Bv.sand500
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.6;
-
-    // Head and neck are drawn but never shaded: no muscle code reaches them.
-    final head = Paint()..color = Bv.sand400;
-    canvas.drawOval(
-      Rect.fromLTWH(38 * sx, 4 * sy, 24 * sx, 26 * sy),
-      head,
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(44 * sx, 27 * sy, 12 * sx, 8 * sy),
-        Radius.circular(3 * sx),
-      ),
-      head,
-    );
-
-    for (final entry in regions.entries) {
-      final count = counts[entry.key] ?? 0;
-      final fill = Paint()
-        ..color = _colourFor(count, max)
-        ..style = PaintingStyle.fill;
-
-      for (final r in entry.value) {
-        final scaled = Rect.fromLTRB(
-          r.left * sx,
-          r.top * sy,
-          r.right * sx,
-          r.bottom * sy,
-        );
-        // Radii proportional to the shape keep a long muscle looking like a
-        // band and a compact one looking round, without any shape being a
-        // plain rectangle.
-        final radius = Radius.elliptical(
-          scaled.width * 0.42,
-          scaled.height * 0.30,
-        );
-        final rr = RRect.fromRectAndRadius(scaled, radius);
-        canvas.drawRRect(rr, fill);
-        canvas.drawRRect(rr, outline);
-
-        // The figure itself, so a shade can be read as a number rather than
-        // only compared against its neighbours. Nothing is drawn for zero:
-        // grey already says that, and a nought on every unworked region is
-        // noise across half the body.
-        if (count > 0) _drawCount(canvas, scaled, count);
-      }
-    }
-  }
-
-  void _drawCount(Canvas canvas, Rect box, int count) {
-    final size = (9.0 * textScale).clamp(9.0, 13.0);
-    // A pair of shapes for one muscle would otherwise each claim the full
-    // count, so the figure only goes where it fits.
-    if (box.width < size * 1.6 || box.height < size * 1.3) return;
-
-    final tp = TextPainter(
-      text: TextSpan(
-        text: '$count',
-        style: TextStyle(
-          fontSize: size,
-          fontWeight: FontWeight.w600,
-          // Dark against the yellow end, light against the red, so the
-          // figure stays readable the whole way along the ramp.
-          color: const Color(0xFF3A2A08),
-          height: 1,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-
-    tp.paint(
-      canvas,
-      Offset(
-        box.center.dx - tp.width / 2,
-        box.center.dy - tp.height / 2,
-      ),
-    );
-  }
-
-  @override
-  bool shouldRepaint(_BodyPainter old) =>
-      old.counts != counts ||
-      old.max != max ||
-      old.regions != regions ||
-      old.textScale != textScale;
-}
-
-/// Each muscle is one or two rects in a 100 x 220 space, mirrored left and
-/// right where the muscle is paired. Sides are not tracked separately, so
-/// both sides of a pair always take the same colour.
-const _frontRegions = <String, List<Rect>>{
-  'TRAPS': [
-    Rect.fromLTRB(33, 33, 47, 43),
-    Rect.fromLTRB(53, 33, 67, 43),
-  ],
-  'SHOULDERS': [
-    Rect.fromLTRB(20, 38, 34, 57),
-    Rect.fromLTRB(66, 38, 80, 57),
-  ],
-  'CHEST': [
-    Rect.fromLTRB(35, 43, 49, 64),
-    Rect.fromLTRB(51, 43, 65, 64),
-  ],
-  'BICEPS': [
-    Rect.fromLTRB(20, 59, 32, 84),
-    Rect.fromLTRB(68, 59, 80, 84),
-  ],
-  'FOREARM': [
-    Rect.fromLTRB(16, 86, 29, 114),
-    Rect.fromLTRB(71, 86, 84, 114),
-  ],
-  'ABS': [
-    Rect.fromLTRB(41, 66, 59, 106),
-  ],
-  'OBLIQUES': [
-    Rect.fromLTRB(33, 68, 40, 102),
-    Rect.fromLTRB(60, 68, 67, 102),
-  ],
-  'HIPS': [
-    Rect.fromLTRB(35, 108, 48, 120),
-    Rect.fromLTRB(52, 108, 65, 120),
-  ],
-  'ABDUCTORS': [
-    Rect.fromLTRB(27, 110, 35, 138),
-    Rect.fromLTRB(65, 110, 73, 138),
-  ],
-  'QUADS': [
-    Rect.fromLTRB(34, 122, 47, 164),
-    Rect.fromLTRB(53, 122, 66, 164),
-  ],
-  'ADDUCTORS': [
-    Rect.fromLTRB(44, 122, 49, 152),
-    Rect.fromLTRB(51, 122, 56, 152),
-  ],
-  'CALVES': [
-    Rect.fromLTRB(35, 172, 46, 206),
-    Rect.fromLTRB(54, 172, 65, 206),
-  ],
-};
-
-const _backRegions = <String, List<Rect>>{
-  'TRAPS': [
-    Rect.fromLTRB(36, 32, 64, 64),
-  ],
-  'SHOULDERS': [
-    Rect.fromLTRB(20, 38, 34, 57),
-    Rect.fromLTRB(66, 38, 80, 57),
-  ],
-  'LATS': [
-    Rect.fromLTRB(30, 58, 47, 94),
-    Rect.fromLTRB(53, 58, 70, 94),
-  ],
-  'TRICEPS': [
-    Rect.fromLTRB(19, 59, 31, 84),
-    Rect.fromLTRB(69, 59, 81, 84),
-  ],
-  'FOREARM': [
-    Rect.fromLTRB(16, 86, 29, 114),
-    Rect.fromLTRB(71, 86, 84, 114),
-  ],
-  'LOWER_BACK': [
-    Rect.fromLTRB(40, 96, 60, 112),
-  ],
-  'GLUTES': [
-    Rect.fromLTRB(33, 114, 49, 136),
-    Rect.fromLTRB(51, 114, 67, 136),
-  ],
-  'HAMSTRINGS': [
-    Rect.fromLTRB(34, 138, 47, 168),
-    Rect.fromLTRB(53, 138, 66, 168),
-  ],
-  'CALVES': [
-    Rect.fromLTRB(35, 172, 46, 206),
-    Rect.fromLTRB(54, 172, 65, 206),
-  ],
-};

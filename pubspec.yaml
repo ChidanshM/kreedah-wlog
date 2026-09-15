@@ -12,6 +12,11 @@ dependencies:
   sqflite: ^2.3.0
   path: ^1.8.0
   path_provider: ^2.1.0
+  # Experiment only, on this branch. Draws the body map from bundled
+  # anatomical drawings and handles tap detection against them. Brings
+  # flutter_svg, path_drawing and xml along with it, against three
+  # dependencies in total before this.
+  muscle_mapper: ^1.2.2
 
 dev_dependencies:
   flutter_test:
