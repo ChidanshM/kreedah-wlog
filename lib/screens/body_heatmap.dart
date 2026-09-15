@@ -1,18 +1,14 @@
 import 'package:flutter/material.dart';
 
+import '../body_shapes.dart';
 import '../theme.dart';
-import '../util.dart';
 
 /// Front and back views with each muscle shaded by how much it was worked.
 ///
-/// The shapes are schematic — recognisable regions in roughly the right
-/// places, not anatomy. They are drawn in code against a fixed 100 x 220
-/// coordinate space per body and scaled to fit, so replacing them later with
-/// a properly drawn asset means swapping [_frontRegions] and [_backRegions]
-/// and nothing else.
-///
-/// Seventeen regions, matching the seventeen muscle codes the exercise data
-/// uses. Anything finer would imply a distinction the data cannot fill.
+/// The outlines come from [frontShapes] and [backShapes]; everything here is
+/// scaling, colour and the figures. Regions the exercise data has no code for
+/// — head, neck, knees, ankles — are drawn and never shaded, so the figure
+/// reads as a body rather than as floating muscles.
 class BodyHeatmap extends StatelessWidget {
   const BodyHeatmap({super.key, required this.counts});
 
@@ -24,7 +20,6 @@ class BodyHeatmap extends StatelessWidget {
     final max = counts.values.fold<int>(0, (a, b) => a > b ? a : b);
     return LayoutBuilder(
       builder: (context, box) {
-        // Two bodies side by side, each keeping its 100:220 proportion.
         final w = (box.maxWidth - Bv.s4) / 2;
         final h = w * 2.2;
         return Column(
@@ -32,9 +27,9 @@ class BodyHeatmap extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _view(w, h, _frontRegions, 'Front', max),
+                _view(w, h, frontShapes, 'Front', max),
                 const SizedBox(width: Bv.s4),
-                _view(w, h, _backRegions, 'Back', max),
+                _view(w, h, backShapes, 'Back', max),
               ],
             ),
             const SizedBox(height: Bv.s3),
@@ -45,8 +40,8 @@ class BodyHeatmap extends StatelessWidget {
     );
   }
 
-  Widget _view(double w, double h, Map<String, List<Rect>> regions,
-      String label, int max) {
+  Widget _view(double w, double h, List<BodyShape> shapes, String label,
+      int max) {
     return Column(
       children: [
         SizedBox(
@@ -54,7 +49,7 @@ class BodyHeatmap extends StatelessWidget {
           height: h,
           child: CustomPaint(
             painter: _BodyPainter(
-              regions: regions,
+              shapes: shapes,
               counts: counts,
               max: max,
               textScale: w / 100,
@@ -67,10 +62,6 @@ class BodyHeatmap extends StatelessWidget {
     );
   }
 
-  /// Grey means nothing logged, which is different from a little logged.
-  /// Blue to red spans least to most, anchored to your own hardest-worked
-  /// muscle rather than to a fixed number, since what counts as a lot depends
-  /// entirely on the routine.
   Widget _legend(int max) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -126,15 +117,32 @@ Color _colourFor(int count, int max) {
       : Color.lerp(mid, high, (t - 0.5) * 2)!;
 }
 
+/// "x y x y ..." to a closed path, scaled into the canvas.
+Path _pathFrom(String points, double sx, double sy) {
+  final n = points.trim().split(RegExp(r'\s+'));
+  final path = Path();
+  for (var i = 0; i + 1 < n.length; i += 2) {
+    final x = double.parse(n[i]) * sx;
+    final y = double.parse(n[i + 1]) * sy;
+    if (i == 0) {
+      path.moveTo(x, y);
+    } else {
+      path.lineTo(x, y);
+    }
+  }
+  path.close();
+  return path;
+}
+
 class _BodyPainter extends CustomPainter {
   _BodyPainter({
-    required this.regions,
+    required this.shapes,
     required this.counts,
     required this.max,
     required this.textScale,
   });
 
-  final Map<String, List<Rect>> regions;
+  final List<BodyShape> shapes;
   final Map<String, int> counts;
   final int max;
 
@@ -149,60 +157,47 @@ class _BodyPainter extends CustomPainter {
     final outline = Paint()
       ..color = Bv.sand500
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.6;
+      ..strokeWidth = 0.5;
 
-    // Head and neck are drawn but never shaded: no muscle code reaches them.
-    final head = Paint()..color = Bv.sand400;
-    canvas.drawOval(
-      Rect.fromLTWH(38 * sx, 4 * sy, 24 * sx, 26 * sy),
-      head,
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(44 * sx, 27 * sy, 12 * sx, 8 * sy),
-        Radius.circular(3 * sx),
-      ),
-      head,
-    );
+    // Where each muscle's figure goes: the largest polygon on each side of
+    // the body. A paired muscle gets one figure per side; a single one gets
+    // one. Drawing on every polygon would put six numbers across the quads.
+    final labelSpots = <String, Map<bool, Rect>>{};
 
-    for (final entry in regions.entries) {
-      final count = counts[entry.key] ?? 0;
+    for (final shape in shapes) {
+      final count = shape.muscle == null ? 0 : (counts[shape.muscle] ?? 0);
       final fill = Paint()
-        ..color = _colourFor(count, max)
+        ..color = shape.muscle == null ? Bv.sand400 : _colourFor(count, max)
         ..style = PaintingStyle.fill;
 
-      for (final r in entry.value) {
-        final scaled = Rect.fromLTRB(
-          r.left * sx,
-          r.top * sy,
-          r.right * sx,
-          r.bottom * sy,
-        );
-        // Radii proportional to the shape keep a long muscle looking like a
-        // band and a compact one looking round, without any shape being a
-        // plain rectangle.
-        final radius = Radius.elliptical(
-          scaled.width * 0.42,
-          scaled.height * 0.30,
-        );
-        final rr = RRect.fromRectAndRadius(scaled, radius);
-        canvas.drawRRect(rr, fill);
-        canvas.drawRRect(rr, outline);
+      for (final poly in shape.polygons) {
+        final path = _pathFrom(poly, sx, sy);
+        canvas.drawPath(path, fill);
+        canvas.drawPath(path, outline);
 
-        // The figure itself, so a shade can be read as a number rather than
-        // only compared against its neighbours. Nothing is drawn for zero:
-        // grey already says that, and a nought on every unworked region is
-        // noise across half the body.
-        if (count > 0) _drawCount(canvas, scaled, count);
+        if (shape.muscle == null || count <= 0) continue;
+        final b = path.getBounds();
+        final leftSide = b.center.dx < size.width / 2;
+        final best = labelSpots[shape.muscle!]?[leftSide];
+        if (best == null || b.width * b.height > best.width * best.height) {
+          (labelSpots[shape.muscle!] ??= {})[leftSide] = b;
+        }
       }
     }
+
+    // Drawn after every shape, so a neighbouring polygon cannot cover a
+    // figure that was painted before it.
+    labelSpots.forEach((muscle, sides) {
+      final count = counts[muscle] ?? 0;
+      for (final b in sides.values) {
+        _drawCount(canvas, b, count);
+      }
+    });
   }
 
   void _drawCount(Canvas canvas, Rect box, int count) {
     final size = (9.0 * textScale).clamp(9.0, 13.0);
-    // A pair of shapes for one muscle would otherwise each claim the full
-    // count, so the figure only goes where it fits.
-    if (box.width < size * 1.6 || box.height < size * 1.3) return;
+    if (box.width < size * 1.4 || box.height < size * 1.2) return;
 
     final tp = TextPainter(
       text: TextSpan(
@@ -210,8 +205,8 @@ class _BodyPainter extends CustomPainter {
         style: TextStyle(
           fontSize: size,
           fontWeight: FontWeight.w600,
-          // Dark against the yellow end, light against the red, so the
-          // figure stays readable the whole way along the ramp.
+          // Dark throughout: the ramp runs yellow to red, so a light figure
+          // would disappear at the yellow end.
           color: const Color(0xFF3A2A08),
           height: 1,
         ),
@@ -221,10 +216,7 @@ class _BodyPainter extends CustomPainter {
 
     tp.paint(
       canvas,
-      Offset(
-        box.center.dx - tp.width / 2,
-        box.center.dy - tp.height / 2,
-      ),
+      Offset(box.center.dx - tp.width / 2, box.center.dy - tp.height / 2),
     );
   }
 
@@ -232,96 +224,6 @@ class _BodyPainter extends CustomPainter {
   bool shouldRepaint(_BodyPainter old) =>
       old.counts != counts ||
       old.max != max ||
-      old.regions != regions ||
+      old.shapes != shapes ||
       old.textScale != textScale;
 }
-
-/// Each muscle is one or two rects in a 100 x 220 space, mirrored left and
-/// right where the muscle is paired. Sides are not tracked separately, so
-/// both sides of a pair always take the same colour.
-const _frontRegions = <String, List<Rect>>{
-  'TRAPS': [
-    Rect.fromLTRB(33, 33, 47, 43),
-    Rect.fromLTRB(53, 33, 67, 43),
-  ],
-  'SHOULDERS': [
-    Rect.fromLTRB(20, 38, 34, 57),
-    Rect.fromLTRB(66, 38, 80, 57),
-  ],
-  'CHEST': [
-    Rect.fromLTRB(35, 43, 49, 64),
-    Rect.fromLTRB(51, 43, 65, 64),
-  ],
-  'BICEPS': [
-    Rect.fromLTRB(20, 59, 32, 84),
-    Rect.fromLTRB(68, 59, 80, 84),
-  ],
-  'FOREARM': [
-    Rect.fromLTRB(16, 86, 29, 114),
-    Rect.fromLTRB(71, 86, 84, 114),
-  ],
-  'ABS': [
-    Rect.fromLTRB(41, 66, 59, 106),
-  ],
-  'OBLIQUES': [
-    Rect.fromLTRB(33, 68, 40, 102),
-    Rect.fromLTRB(60, 68, 67, 102),
-  ],
-  'HIPS': [
-    Rect.fromLTRB(35, 108, 48, 120),
-    Rect.fromLTRB(52, 108, 65, 120),
-  ],
-  'ABDUCTORS': [
-    Rect.fromLTRB(27, 110, 35, 138),
-    Rect.fromLTRB(65, 110, 73, 138),
-  ],
-  'QUADS': [
-    Rect.fromLTRB(34, 122, 47, 164),
-    Rect.fromLTRB(53, 122, 66, 164),
-  ],
-  'ADDUCTORS': [
-    Rect.fromLTRB(44, 122, 49, 152),
-    Rect.fromLTRB(51, 122, 56, 152),
-  ],
-  'CALVES': [
-    Rect.fromLTRB(35, 172, 46, 206),
-    Rect.fromLTRB(54, 172, 65, 206),
-  ],
-};
-
-const _backRegions = <String, List<Rect>>{
-  'TRAPS': [
-    Rect.fromLTRB(36, 32, 64, 64),
-  ],
-  'SHOULDERS': [
-    Rect.fromLTRB(20, 38, 34, 57),
-    Rect.fromLTRB(66, 38, 80, 57),
-  ],
-  'LATS': [
-    Rect.fromLTRB(30, 58, 47, 94),
-    Rect.fromLTRB(53, 58, 70, 94),
-  ],
-  'TRICEPS': [
-    Rect.fromLTRB(19, 59, 31, 84),
-    Rect.fromLTRB(69, 59, 81, 84),
-  ],
-  'FOREARM': [
-    Rect.fromLTRB(16, 86, 29, 114),
-    Rect.fromLTRB(71, 86, 84, 114),
-  ],
-  'LOWER_BACK': [
-    Rect.fromLTRB(40, 96, 60, 112),
-  ],
-  'GLUTES': [
-    Rect.fromLTRB(33, 114, 49, 136),
-    Rect.fromLTRB(51, 114, 67, 136),
-  ],
-  'HAMSTRINGS': [
-    Rect.fromLTRB(34, 138, 47, 168),
-    Rect.fromLTRB(53, 138, 66, 168),
-  ],
-  'CALVES': [
-    Rect.fromLTRB(35, 172, 46, 206),
-    Rect.fromLTRB(54, 172, 65, 206),
-  ],
-};
