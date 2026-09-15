@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'db.dart';
+import 'util.dart';
 
 /// One exercise from the Garmin database (or a user-created one).
 class Exercise {

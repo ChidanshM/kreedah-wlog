@@ -44,6 +44,7 @@ class _ExercisePickerState extends State<ExercisePicker> {
       _query,
       equipment: _filter.equipment,
       muscles: _filter.muscles,
+      bodyParts: _filter.bodyParts,
       onlyCustom: _filter.onlyCustom,
     );
     final active = filterIsActive(_filter);
@@ -52,6 +53,7 @@ class _ExercisePickerState extends State<ExercisePicker> {
     final available = ExerciseLibrary.countMatching(
       equipment: _filter.equipment,
       muscles: _filter.muscles,
+      bodyParts: _filter.bodyParts,
       onlyCustom: _filter.onlyCustom,
     );
 
@@ -114,10 +116,20 @@ class _ExercisePickerState extends State<ExercisePicker> {
                         onDeleted: () => setState(() => _filter = (
                               equipment: _filter.equipment,
                               muscles: _filter.muscles,
+                              bodyParts: _filter.bodyParts,
                               onlyCustom: false,
+                              onlyDone: _filter.onlyDone,
                             )),
                       ),
                     ),
+                  ..._filter.bodyParts.map((p) => Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: InputChip(
+                          label: Text(p),
+                          onDeleted: () =>
+                              setState(() => _filter.bodyParts.remove(p)),
+                        ),
+                      )),
                   ..._filter.equipment.map((e) => Padding(
                         padding: const EdgeInsets.only(right: 6),
                         child: InputChip(
@@ -126,7 +138,7 @@ class _ExercisePickerState extends State<ExercisePicker> {
                               setState(() => _filter.equipment.remove(e)),
                         ),
                       )),
-                  ..._filter.muscles.map((m) => Padding(
+                  ...sortMuscles(_filter.muscles).map((m) => Padding(
                         padding: const EdgeInsets.only(right: 6),
                         child: InputChip(
                           label: Text(pretty(m)),
