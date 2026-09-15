@@ -120,9 +120,12 @@ class _RoutineEditScreenState extends State<RoutineEditScreen> {
               : ReorderableListView.builder(
                   padding: const EdgeInsets.only(bottom: 96),
                   itemCount: _rows.length,
-                  onReorder: (oldIndex, newIndex) async {
+                  // onReorderItem rather than onReorder: it hands back an
+                  // index already adjusted for the item having been lifted
+                  // out, so the off-by-one correction every caller used to
+                  // write by hand is gone.
+                  onReorderItem: (oldIndex, newIndex) async {
                     setState(() {
-                      if (newIndex > oldIndex) newIndex -= 1;
                       final item = _rows.removeAt(oldIndex);
                       _rows.insert(newIndex, item);
                     });

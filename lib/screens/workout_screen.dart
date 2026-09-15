@@ -540,8 +540,11 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                         label: const Text('Add exercise'),
                       ),
                     ),
-                    onReorder: (oldIndex, newIndex) async {
-                      if (newIndex > oldIndex) newIndex -= 1;
+                    // onReorderItem rather than onReorder: the index it
+                    // hands back is already adjusted for the card having
+                    // been lifted out, so the correction every caller wrote
+                    // by hand is gone.
+                    onReorderItem: (oldIndex, newIndex) async {
                       if (oldIndex == newIndex) return;
                       // Move locally first so the list settles under the
                       // finger, then persist and reload.
