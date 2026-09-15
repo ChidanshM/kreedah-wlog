@@ -176,6 +176,13 @@ class _ExerciseConfigSheet extends StatefulWidget {
 }
 
 class _ExerciseConfigSheetState extends State<_ExerciseConfigSheet> {
+  /// Which exercise this slot holds. Editable, so a plan can be changed
+  /// without losing its place in the order or anything configured on it:
+  /// removing and adding again put the replacement at the bottom with every
+  /// target blank.
+  late String _exKey = widget.row['ex_key'] as String;
+  late String _exName = widget.row['ex_name'] as String;
+
   late String _setType = widget.row['set_type'] as String;
   late String _unit = widget.row['unit'] as String;
   late bool _unilateral = (widget.row['unilateral'] as int) == 1;
@@ -368,6 +375,20 @@ class _ExerciseConfigSheetState extends State<_ExerciseConfigSheet> {
     );
   }
 
+  /// Swap the exercise for another, keeping everything else.
+  ///
+  /// History follows the new exercise rather than the old one, since what is
+  /// pre-filled comes from the exercise actually being done. Sessions already
+  /// logged keep their own copy of the name and are untouched.
+  Future<void> _changeExercise() async {
+    final picked = await pickExercises(context);
+    if (picked == null || picked.isEmpty) return;
+    setState(() {
+      _exKey = picked.first.key;
+      _exName = picked.first.name;
+    });
+  }
+
   /// Per-set rows are written straight to the database, since they live in
   /// their own table rather than on the exercise row the sheet returns.
   Future<void> _save() async {
@@ -399,6 +420,8 @@ class _ExerciseConfigSheetState extends State<_ExerciseConfigSheet> {
 
     if (!mounted) return;
     Navigator.pop(context, {
+      'ex_key': _exKey,
+      'ex_name': _exName,
       'set_type': _setType,
       'unit': _unit,
       'unilateral': _unilateral ? 1 : 0,
@@ -425,8 +448,29 @@ class _ExerciseConfigSheetState extends State<_ExerciseConfigSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(widget.row['ex_name'] as String,
-                style: Theme.of(context).textTheme.titleLarge),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(_exName,
+                      style: Theme.of(context).textTheme.titleLarge),
+                ),
+                TextButton.icon(
+                  onPressed: _changeExercise,
+                  icon: const Icon(Icons.swap_horiz, size: 18),
+                  label: const Text('Change'),
+                ),
+              ],
+            ),
+            if (_exKey != widget.row['ex_key'])
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Replacing ${widget.row['ex_name']}. Sessions already '
+                  'logged keep their own record.',
+                  style: BvType.bodySm,
+                ),
+              ),
             const SizedBox(height: 16),
             const Text('Set type'),
             const SizedBox(height: 8),
