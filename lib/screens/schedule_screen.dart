@@ -158,7 +158,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Scheduling')),
+      appBar: AppBar(title: const Text('Schedules')),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _add,
         icon: const Icon(Icons.add),
@@ -227,9 +227,40 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
 // ---------------------------------------------------------------------------
 
+/// Open the sheet for one routine, with nothing to choose.
+///
+/// Reached from a routine rather than from the list, where the routine is
+/// already known: offering every other routine there would be asking a
+/// question that has already been answered.
+///
+/// Returns true when a schedule was created.
+Future<bool> scheduleRoutine(
+  BuildContext context, {
+  required int routineId,
+  required String routineName,
+}) async {
+  final made = await showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    builder: (_) => _ScheduleSheet(
+      routines: [
+        {'id': routineId, 'name': routineName}
+      ],
+      fixed: true,
+    ),
+  );
+  if (made == true) notifyDataChanged();
+  return made == true;
+}
+
 class _ScheduleSheet extends StatefulWidget {
-  const _ScheduleSheet({required this.routines});
+  const _ScheduleSheet({required this.routines, this.fixed = false});
+
   final List<Map<String, dynamic>> routines;
+
+  /// True when the routine is already settled and should be stated rather
+  /// than offered as a choice.
+  final bool fixed;
 
   @override
   State<_ScheduleSheet> createState() => _ScheduleSheetState();
@@ -292,25 +323,31 @@ class _ScheduleSheetState extends State<_ScheduleSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Schedule a routine', style: BvType.headlineSm),
+            Text(
+                widget.fixed
+                    ? 'Schedule ${widget.routines.first['name']}'
+                    : 'Schedule a routine',
+                style: BvType.headlineSm),
             const SizedBox(height: Bv.s3),
 
-            Text('ROUTINE', style: BvType.label),
-            const SizedBox(height: Bv.s2),
-            Wrap(
-              spacing: 6,
-              runSpacing: 4,
-              children: widget.routines
-                  .map((r) => ChoiceChip(
-                        label: Text(r['name'] as String),
-                        selected: _routineId == r['id'],
-                        onSelected: (_) =>
-                            setState(() => _routineId = r['id'] as int),
-                      ))
-                  .toList(),
-            ),
+            if (!widget.fixed) ...[
+              Text('ROUTINE', style: BvType.label),
+              const SizedBox(height: Bv.s2),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: widget.routines
+                    .map((r) => ChoiceChip(
+                          label: Text(r['name'] as String),
+                          selected: _routineId == r['id'],
+                          onSelected: (_) =>
+                              setState(() => _routineId = r['id'] as int),
+                        ))
+                    .toList(),
+              ),
+              const SizedBox(height: Bv.s4),
+            ],
 
-            const SizedBox(height: Bv.s4),
             Text('STARTING', style: BvType.label),
             ListTile(
               contentPadding: EdgeInsets.zero,

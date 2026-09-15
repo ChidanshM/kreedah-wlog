@@ -337,7 +337,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         ListTile(
           leading: const Icon(Icons.event_repeat_outlined),
-          title: const Text('Scheduling'),
+          title: const Text('Schedules'),
           subtitle: const Text('Planned days and what you kept to'),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => _open_(const ScheduleScreen()),

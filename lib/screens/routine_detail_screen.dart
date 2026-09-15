@@ -61,8 +61,11 @@ class _RoutineDetailScreenState extends State<RoutineDetailScreen> {
   }
 
   Future<void> _schedule() async {
-    await Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => const ScheduleScreen()));
+    await scheduleRoutine(
+      context,
+      routineId: widget.routineId,
+      routineName: _name,
+    );
     await _load();
   }
 

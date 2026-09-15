@@ -366,8 +366,11 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
         await _logPast(r);
         return;
       case 'schedule':
-        await Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const ScheduleScreen()));
+        await scheduleRoutine(
+          context,
+          routineId: id,
+          routineName: r['name'] as String,
+        );
         break;
       case 'export':
         await _exportRoutines(preselect: id);
