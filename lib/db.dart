@@ -1271,8 +1271,9 @@ class Db {
       final entered = (s['weight_entered'] as num?)?.toDouble();
       final oldUnit = (s['entry_unit'] as String?) ?? 'kg';
       if (entered == null) continue;
-      // Converting from what was typed, rather than from the stored kg value,
-      // avoids compounding the 2-decimal rounding on every switch.
+      // Converting from what was typed, rather than from the stored
+      // kilogram value, keeps the figure exact: the stored one is canonical
+      // but the typed one is what the machine actually said.
       batch.update(
         'sets',
         {
@@ -1368,12 +1369,22 @@ class Db {
         final vol = (setType == SetType.reps && kg != null && reps != null)
             ? kg * reps
             : 0.0;
+        // The unit belongs to the set rather than the exercise, so a set
+        // pre-filled from history keeps the unit it was actually performed
+        // in. Taking the exercise's undid that a week later: a cable stack
+        // marked 32.5 kg came back labelled 32.5 lb, the load right and the
+        // label wrong, which is the same error one layer up from the one
+        // the per-set unit was introduced to fix.
+        final entryUnit = (src?['entry_unit'] as String?) ?? unit;
+        final entered = (src?['weight_entered'] as num?)?.toDouble() ??
+            (kg == null ? null : fromKg(kg, entryUnit));
+
         batch.insert('sets', {
           'we_id': weId,
           'set_number': i,
           'side': side,
-          'entry_unit': unit,
-          'weight_entered': kg == null ? null : fromKg(kg, unit),
+          'entry_unit': entryUnit,
+          'weight_entered': entered,
           'weight_kg': kg,
           'reps': reps,
           'duration_sec': duration,
@@ -1408,12 +1419,18 @@ class Db {
         src = last.firstWhere((e) => e['side'] == side, orElse: () => last.first);
       }
       final kg = (src?['weight_kg'] as num?)?.toDouble();
+      // Carries the unit of the set being copied, not the exercise's. A set
+      // added after one logged on a machine marked in kilograms should
+      // arrive in kilograms, whatever the exercise is configured as.
+      final entryUnit = (src?['entry_unit'] as String?) ?? unit;
+      final entered = (src?['weight_entered'] as num?)?.toDouble() ??
+          (kg == null ? null : fromKg(kg, entryUnit));
       batch.insert('sets', {
         'we_id': weId,
         'set_number': next,
         'side': side,
-        'entry_unit': unit,
-        'weight_entered': kg == null ? null : fromKg(kg, unit),
+        'entry_unit': entryUnit,
+        'weight_entered': entered,
         'weight_kg': kg,
         'reps': src?['reps'],
         'duration_sec': src?['duration_sec'],
