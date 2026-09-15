@@ -62,7 +62,7 @@ class _RootShellState extends State<RootShell> {
           NavigationDestination(
             icon: Icon(Icons.fitness_center_outlined),
             selectedIcon: Icon(Icons.fitness_center),
-            label: 'Train',
+            label: 'Routines',
           ),
           NavigationDestination(
             icon: Icon(Icons.calendar_month_outlined),
@@ -80,8 +80,8 @@ class _RootShellState extends State<RootShell> {
             label: 'Logbook',
           ),
           NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings),
+            icon: Icon(Icons.more_horiz),
+            selectedIcon: Icon(Icons.more_horiz),
             label: 'More',
           ),
         ],
