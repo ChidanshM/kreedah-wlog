@@ -502,7 +502,9 @@ class Exporter {
     return out;
   }
 
-  static Future<int> importRoutinesFrom(String ref) async {
+  /// Read and validate a routine file without importing it, so what is in
+  /// it can be shown before anything is added.
+  static Future<Map<String, dynamic>> readRoutineFile(String ref) async {
     final raw = ref.startsWith('content://')
         ? await Saf.readFile(ref)
         : await File(ref).readAsString();
@@ -514,7 +516,11 @@ class Exporter {
           : 'Not a routine file: it declares itself as '
               '${format ?? 'nothing at all'}.');
     }
-    return Db.importRoutines(data);
+    return data;
+  }
+
+  static Future<int> importRoutinesFrom(String ref) async {
+    return Db.importRoutines(await readRoutineFile(ref));
   }
 
   /// Every .json in whichever location is in use.
