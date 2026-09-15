@@ -55,6 +55,7 @@ extension on _Part {
 
 class _RestoreScreenState extends State<RestoreScreen> {
   List<({String name, String ref})> _files = const [];
+  List<({String name, String ref})> _routineFiles = const [];
   bool _loading = true;
   final _parts = {..._Part.values};
 
@@ -66,11 +67,34 @@ class _RestoreScreenState extends State<RestoreScreen> {
 
   Future<void> _load() async {
     final files = await Exporter.availableBackups();
+    final routines = await Exporter.availableRoutineFiles();
     if (!mounted) return;
     setState(() {
       _files = files;
+      _routineFiles = routines;
       _loading = false;
     });
+  }
+
+  /// Bring in routines on their own. Adds rather than replaces, so nothing
+  /// already here can be lost by importing.
+  Future<void> _importRoutines(({String name, String ref}) f) async {
+    try {
+      final n = await Exporter.importRoutinesFrom(f.ref);
+      await ExerciseLibrary.load();
+      notifyDataChanged();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(n == 0
+            ? 'No routines in that file.'
+            : 'Added $n routine${n == 1 ? '' : 's'}.'),
+      ));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Import failed: $e')));
+      }
+    }
   }
 
   bool get _everything => _parts.length == _Part.values.length;
@@ -193,6 +217,28 @@ class _RestoreScreenState extends State<RestoreScreen> {
                       leading: const Icon(Icons.settings_backup_restore),
                       title: Text(f.name),
                       onTap: () => _restore(f),
+                    )),
+                const Divider(height: Bv.s5),
+                Padding(
+                  padding:
+                      const EdgeInsets.fromLTRB(Bv.s4, Bv.s2, Bv.s4, Bv.s1),
+                  child: Text('ROUTINE FILES', style: BvType.label),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(Bv.s4, 0, Bv.s4, Bv.s2),
+                  child: Text(
+                    _routineFiles.isEmpty
+                        ? 'No routine files found. Any file declaring itself '
+                            'as routines appears here, whatever it is named.'
+                        : 'Routines are added rather than replacing anything. '
+                            'A name already in use gains a suffix.',
+                    style: BvType.bodySm,
+                  ),
+                ),
+                ..._routineFiles.map((f) => ListTile(
+                      leading: const Icon(Icons.playlist_add),
+                      title: Text(f.name),
+                      onTap: () => _importRoutines(f),
                     )),
                 const Divider(height: Bv.s5),
                 Padding(

@@ -210,10 +210,7 @@ class Exporter {
   }
 
   /// Backups available to restore from, newest first.
-  static Future<List<({String name, String ref})>> availableBackups() async {
-    final all = await _jsonFiles();
-    return all.where((f) => f.name.startsWith('backup')).toList();
-  }
+  // Defined below with the other format-sniffing helpers.
 
   /// [ref] is either a document URI from the chosen folder or a file path.
   /// [only] restricts which tables are brought back.
@@ -467,11 +464,42 @@ class Exporter {
     return (name: name, where: dir.path, reachable: false);
   }
 
-  /// Routine files available to import, newest first. Kept apart from full
-  /// backups by their name, so the two lists never mix.
-  static Future<List<({String name, String ref})>> availableRoutineFiles() async {
-    final all = await _jsonFiles();
-    return all.where((f) => f.name.startsWith(_routinePrefix)).toList();
+  /// Routine files available to import, newest first.
+  ///
+  /// Chosen by what a file declares itself to be rather than by what it is
+  /// called. Matching on the name meant a perfectly good routine file was
+  /// invisible unless it happened to keep the name this app gave it, which
+  /// made a hand-written or renamed one impossible to import.
+  static Future<List<({String name, String ref})>> availableRoutineFiles() =>
+      _filesDeclaring('workout_log_routines');
+
+  /// Backups available to restore from, newest first. Same rule: the file
+  /// says what it is.
+  static Future<List<({String name, String ref})>> availableBackups() =>
+      _filesDeclaring('workout_log_backup');
+
+  /// Every .json in the export folder that declares the given format.
+  ///
+  /// Each candidate is opened and read. That is more work than reading a
+  /// name, but a folder holds tens of files rather than thousands, and it is
+  /// the only way to be right about a file someone renamed.
+  static Future<List<({String name, String ref})>> _filesDeclaring(
+      String format) async {
+    final out = <({String name, String ref})>[];
+    for (final f in await _jsonFiles()) {
+      try {
+        final raw = f.ref.startsWith('content://')
+            ? await Saf.readFile(f.ref)
+            : await File(f.ref).readAsString();
+        final data = jsonDecode(raw);
+        if (data is Map && data['format'] == format) out.add(f);
+      } catch (_) {
+        // Not JSON, unreadable, or something else entirely. A folder the
+        // user also keeps other things in should not break the list.
+        continue;
+      }
+    }
+    return out;
   }
 
   static Future<int> importRoutinesFrom(String ref) async {
@@ -479,9 +507,12 @@ class Exporter {
         ? await Saf.readFile(ref)
         : await File(ref).readAsString();
     final data = jsonDecode(raw) as Map<String, dynamic>;
-    if (data['format'] != 'workout_log_routines') {
-      throw const FormatException(
-          'Not a routine file. A full backup is restored from Restore instead.');
+    final format = data['format'];
+    if (format != 'workout_log_routines') {
+      throw FormatException(format == 'workout_log_backup'
+          ? 'That is a full backup. Bring it back from Restore instead.'
+          : 'Not a routine file: it declares itself as '
+              '${format ?? 'nothing at all'}.');
     }
     return Db.importRoutines(data);
   }
