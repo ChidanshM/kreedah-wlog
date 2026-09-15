@@ -198,7 +198,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
     final missed = planned.isNotEmpty && past && !allKept;
 
     return InkWell(
-      onTap: () => setState(() => _selected = _dayOf(day)),
+      onTap: () {
+        setState(() => _selected = _dayOf(day));
+        // Scrolling continuously, the period shown follows the selected day,
+        // so the map has to follow it too.
+        _loadMuscle();
+      },
       child: Container(
         height: size,
         margin: const EdgeInsets.all(2),
@@ -360,10 +365,15 @@ class _CalendarScreenState extends State<CalendarScreen> {
         isFirst: _view == _View.month,
         tooltipFirst: 'Month',
         tooltipSecond: 'Week',
-        onChanged: (wantFirst) => setState(() {
-          _view = wantFirst ? _View.month : _View.week;
-          _resetScroll();
-        }),
+        onChanged: (wantFirst) {
+          setState(() {
+            _view = wantFirst ? _View.month : _View.week;
+            _resetScroll();
+          });
+          // A month and a week cover different spans, so the map is a
+          // different question in each.
+          _loadMuscle();
+        },
       );
 
   Widget _modeToggle() => _SlideToggle(
@@ -372,10 +382,15 @@ class _CalendarScreenState extends State<CalendarScreen> {
         isFirst: _mode == _Mode.continuous,
         tooltipFirst: 'Scroll continuously',
         tooltipSecond: 'One at a time',
-        onChanged: (wantFirst) => setState(() {
-          _mode = wantFirst ? _Mode.continuous : _Mode.paged;
-          _resetScroll();
-        }),
+        onChanged: (wantFirst) {
+          setState(() {
+            _mode = wantFirst ? _Mode.continuous : _Mode.paged;
+            _resetScroll();
+          });
+          // The two modes take their period from different places: one from
+          // the selected day, the other from the page being shown.
+          _loadMuscle();
+        },
       );
 
   // -------------------------------------------------------------- calendar
@@ -521,6 +536,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
       _scroll = null;
       _controllerGeneration++;
     });
+    await _loadMuscle();
   }
 
   @override
@@ -549,10 +565,13 @@ class _CalendarScreenState extends State<CalendarScreen> {
           children: [
             Expanded(child: Center(child: _viewToggle())),
             TextButton(
-              onPressed: () => setState(() {
-                _selected = _dayOf(DateTime.now());
-                _resetScroll();
-              }),
+              onPressed: () {
+                setState(() {
+                  _selected = _dayOf(DateTime.now());
+                  _resetScroll();
+                });
+                _loadMuscle();
+              },
               child: const Text(
                 'Today',
                 style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),

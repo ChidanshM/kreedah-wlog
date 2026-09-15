@@ -20,6 +20,16 @@ extension HeatWindowX on HeatWindow {
         HeatWindow.year => '1Y',
       };
 
+  /// What the span actually covers, for the heading. Said in days rather
+  /// than as "this month", because it rolls back from today rather than
+  /// starting at a boundary.
+  String get heading => switch (this) {
+        HeatWindow.week => 'WORKED IN THE LAST 7 DAYS',
+        HeatWindow.fourWeeks => 'WORKED IN THE LAST 28 DAYS',
+        HeatWindow.threeMonths => 'WORKED IN THE LAST 90 DAYS',
+        HeatWindow.year => 'WORKED IN THE LAST YEAR',
+      };
+
   int get days => switch (this) {
         HeatWindow.week => 7,
         HeatWindow.fourWeeks => 28,
@@ -70,6 +80,10 @@ class _BodyHeatmapPanelState extends State<BodyHeatmapPanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // The heading belongs here rather than beside this, so it cannot say
+        // one span while the buttons say another.
+        Text(_window.heading, style: BvType.label),
+        const SizedBox(height: Bv.s2),
         Row(
           children: HeatWindow.values
               .map((w) => Padding(

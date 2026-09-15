@@ -135,10 +135,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(height: Bv.s2),
                   _recentSection(),
                   const Divider(height: Bv.s5),
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(Bv.s4, 0, Bv.s4, Bv.s2),
-                    child: Text('WORKED THIS WEEK', style: BvType.label),
-                  ),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: Bv.s4),
                     child: const BodyHeatmapPanel(),
