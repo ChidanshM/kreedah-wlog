@@ -96,6 +96,30 @@ jobs:
             /tmp/app/android/app/src/main/AndroidManifest.xml
           grep -n 'android:label' /tmp/app/android/app/src/main/AndroidManifest.xml
 
+          # A build from a branch installs as its own application rather than
+          # over the real one, so two experiments can be tried side by side
+          # and neither touches the database holding actual training. Only
+          # the identifier changes, never the namespace, which is the Kotlin
+          # package the hand-written Android source lives in.
+          if [ "${GITHUB_REF_NAME}" != "main" ] && [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            SUFFIX=$(echo "${GITHUB_REF_NAME}" \
+              | tr '[:upper:]' '[:lower:]' \
+              | tr -cd '[:alnum:]' \
+              | cut -c1-12)
+            [ -z "$SUFFIX" ] && SUFFIX=branch
+            echo "Branch build: installing as com.kreedah.workout_log.$SUFFIX"
+            for f in /tmp/app/android/app/build.gradle /tmp/app/android/app/build.gradle.kts; do
+              [ -f "$f" ] && sed -i \
+                "/applicationId/s/com\.kreedah\.workout_log/com.kreedah.workout_log.$SUFFIX/" "$f"
+            done
+            grep -rn 'applicationId' /tmp/app/android/app/build.gradle* || true
+            # Different name on the launcher too, or two identical icons sit
+            # side by side with no way to tell which is which.
+            sed -i "s|</string>| ($SUFFIX)</string>|" \
+              /tmp/app/android/app/src/main/res/values/strings.xml
+            cat /tmp/app/android/app/src/main/res/values/strings.xml
+          fi
+
       - name: Dependencies
         working-directory: /tmp/app
         run: flutter pub get
