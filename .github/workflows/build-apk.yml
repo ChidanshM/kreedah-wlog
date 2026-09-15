@@ -19,13 +19,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # Full history: the build number is the commit count, which needs
           # more than the single commit a shallow clone gives.
           fetch-depth: 0
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -320,7 +320,7 @@ jobs:
           REF=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
           echo "name=wlog-$REF-b${{ steps.src.outputs.build }}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.art.outputs.name }}
           path: /tmp/out/*.apk
