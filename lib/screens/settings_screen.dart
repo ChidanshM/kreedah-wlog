@@ -8,8 +8,8 @@ import 'body_heatmap_screen.dart';
 import 'equipment_screen.dart';
 import 'export_sheet.dart';
 import 'guide_screen.dart';
+import 'import_screen.dart';
 import 'library_screen.dart';
-import 'restore_screen.dart';
 import 'schedule_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -278,13 +278,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: _busy ? null : _export,
           ),
           ListTile(
-            leading: const Icon(Icons.settings_backup_restore),
-            title: const Text('Restore'),
-            subtitle: const Text('Bring back a backup, whole or in part'),
+            leading: const Icon(Icons.download_outlined),
+            title: const Text('Import'),
+            subtitle: const Text('Routines, or restore a backup'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () async {
               await Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const RestoreScreen()));
+                  MaterialPageRoute(builder: (_) => const ImportScreen()));
               await _load();
             },
           ),

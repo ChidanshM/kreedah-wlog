@@ -1,23 +1,103 @@
 import 'package:flutter/material.dart';
 
-import '../app_events.dart';
 import '../db.dart';
 import '../export.dart';
 import '../library.dart';
+import '../app_events.dart';
 import '../theme.dart';
-import '../util.dart';
+import 'routine_import.dart';
 
-/// Bringing data back in: a full backup, or parts of one.
+/// Everything that brings data in.
 ///
-/// Kept apart from exporting because the two are not symmetrical. Exporting
-/// writes a file and changes nothing; restoring replaces what is here, which
-/// deserves its own place rather than sitting one tap from the button that
-/// makes a backup.
-class RestoreScreen extends StatefulWidget {
-  const RestoreScreen({super.key});
+/// Kept apart from exporting because the two are not symmetrical: exporting
+/// writes a file and changes nothing, while importing changes what is here.
+/// Split by what you are bringing in rather than by which file you have,
+/// since the two kinds behave differently — routines are added alongside
+/// what exists, a backup replaces it.
+class ImportScreen extends StatefulWidget {
+  const ImportScreen({super.key});
 
   @override
-  State<RestoreScreen> createState() => _RestoreScreenState();
+  State<ImportScreen> createState() => _ImportScreenState();
+}
+
+class _ImportScreenState extends State<ImportScreen> {
+  int _routineFiles = 0;
+  int _backups = 0;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _count();
+  }
+
+  Future<void> _count() async {
+    final r = await Exporter.availableRoutineFiles();
+    final b = await Exporter.availableBackups();
+    if (!mounted) return;
+    setState(() {
+      _routineFiles = r.length;
+      _backups = b.length;
+      _loading = false;
+    });
+  }
+
+  String _found(int n, String what) => n == 0
+      ? 'None found'
+      : '$n file${n == 1 ? '' : 's'} of $what in the export folder';
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Import')),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.playlist_add),
+                  title: const Text('Routines'),
+                  subtitle: Text(
+                      '${_found(_routineFiles, 'routines')}\nAdded alongside '
+                      'what is already here. Nothing is replaced.'),
+                  isThreeLine: true,
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () async {
+                    await importRoutinesFlow(context);
+                    await _count();
+                  },
+                ),
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.settings_backup_restore),
+                  title: const Text('Restore from a backup'),
+                  subtitle: Text(
+                      '${_found(_backups, 'backups')}\nReplaces what is here, '
+                      'in whole or in part.'),
+                  isThreeLine: true,
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () async {
+                    await Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => const RestoreBackupScreen()));
+                    await _count();
+                  },
+                ),
+                const Divider(height: Bv.s5),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: Bv.s4),
+                  child: Text(
+                    'Files are read from the folder exports are written to, so '
+                    'anything copied in from a computer appears here. What a '
+                    'file is called does not matter: each one is read to see '
+                    'what it says it is.',
+                    style: BvType.bodySm,
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
 }
 
 /// What a restore is allowed to touch.
@@ -53,9 +133,16 @@ extension on _Part {
       };
 }
 
-class _RestoreScreenState extends State<RestoreScreen> {
+/// Restoring a backup: choose what it may touch, then which file.
+class RestoreBackupScreen extends StatefulWidget {
+  const RestoreBackupScreen({super.key});
+
+  @override
+  State<RestoreBackupScreen> createState() => _RestoreBackupScreenState();
+}
+
+class _RestoreBackupScreenState extends State<RestoreBackupScreen> {
   List<({String name, String ref})> _files = const [];
-  List<({String name, String ref})> _routineFiles = const [];
   bool _loading = true;
   final _parts = {..._Part.values};
 
@@ -67,34 +154,11 @@ class _RestoreScreenState extends State<RestoreScreen> {
 
   Future<void> _load() async {
     final files = await Exporter.availableBackups();
-    final routines = await Exporter.availableRoutineFiles();
     if (!mounted) return;
     setState(() {
       _files = files;
-      _routineFiles = routines;
       _loading = false;
     });
-  }
-
-  /// Bring in routines on their own. Adds rather than replaces, so nothing
-  /// already here can be lost by importing.
-  Future<void> _importRoutines(({String name, String ref}) f) async {
-    try {
-      final n = await Exporter.importRoutinesFrom(f.ref);
-      await ExerciseLibrary.load();
-      notifyDataChanged();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(n == 0
-            ? 'No routines in that file.'
-            : 'Added $n routine${n == 1 ? '' : 's'}.'),
-      ));
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Import failed: $e')));
-      }
-    }
   }
 
   bool get _everything => _parts.length == _Part.values.length;
@@ -102,11 +166,11 @@ class _RestoreScreenState extends State<RestoreScreen> {
   Future<void> _restore(({String name, String ref}) file) async {
     if (_parts.isEmpty) return;
 
-    // Schedules point at routines, and sessions are pre-filled from them, so
-    // restoring one without the other can leave a schedule with nothing to
-    // run. Said plainly rather than silently prevented.
-    final orphaned = _parts.contains(_Part.schedules) &&
-        !_parts.contains(_Part.routines);
+    // Schedules point at routines, so restoring one without the other can
+    // leave a schedule with nothing to run. Said plainly rather than
+    // silently prevented.
+    final orphaned =
+        _parts.contains(_Part.schedules) && !_parts.contains(_Part.routines);
 
     final ok = await showDialog<bool>(
       context: context,
@@ -136,9 +200,7 @@ class _RestoreScreenState extends State<RestoreScreen> {
     try {
       final n = await Exporter.restoreFrom(
         file.ref,
-        only: _everything
-            ? null
-            : {for (final p in _parts) ...p.tables},
+        only: _everything ? null : {for (final p in _parts) ...p.tables},
       );
       await ExerciseLibrary.load();
       notifyDataChanged();
@@ -158,7 +220,7 @@ class _RestoreScreenState extends State<RestoreScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Restore')),
+      appBar: AppBar(title: const Text('Restore from a backup')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -194,11 +256,10 @@ class _RestoreScreenState extends State<RestoreScreen> {
                 ),
                 const Divider(),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(Bv.s4, Bv.s2, Bv.s4, Bv.s1),
+                  padding:
+                      const EdgeInsets.fromLTRB(Bv.s4, Bv.s2, Bv.s4, Bv.s1),
                   child: Text(
-                    _parts.isEmpty
-                        ? 'NOTHING SELECTED'
-                        : 'RESTORE FROM',
+                    _parts.isEmpty ? 'NOTHING SELECTED' : 'RESTORE FROM',
                     style: BvType.label,
                   ),
                 ),
@@ -217,28 +278,6 @@ class _RestoreScreenState extends State<RestoreScreen> {
                       leading: const Icon(Icons.settings_backup_restore),
                       title: Text(f.name),
                       onTap: () => _restore(f),
-                    )),
-                const Divider(height: Bv.s5),
-                Padding(
-                  padding:
-                      const EdgeInsets.fromLTRB(Bv.s4, Bv.s2, Bv.s4, Bv.s1),
-                  child: Text('ROUTINE FILES', style: BvType.label),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(Bv.s4, 0, Bv.s4, Bv.s2),
-                  child: Text(
-                    _routineFiles.isEmpty
-                        ? 'No routine files found. Any file declaring itself '
-                            'as routines appears here, whatever it is named.'
-                        : 'Routines are added rather than replacing anything. '
-                            'A name already in use gains a suffix.',
-                    style: BvType.bodySm,
-                  ),
-                ),
-                ..._routineFiles.map((f) => ListTile(
-                      leading: const Icon(Icons.playlist_add),
-                      title: Text(f.name),
-                      onTap: () => _importRoutines(f),
                     )),
                 const Divider(height: Bv.s5),
                 Padding(

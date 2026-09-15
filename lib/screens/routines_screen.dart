@@ -7,6 +7,7 @@ import '../theme.dart';
 import '../util.dart';
 import 'routine_edit_screen.dart';
 import 'routine_detail_screen.dart';
+import 'routine_import.dart';
 import 'guide_screen.dart';
 import 'schedule_screen.dart';
 import 'session_time_sheet.dart';
@@ -271,167 +272,12 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
     }
   }
 
-  /// Bring routines in from a file.
-  ///
-  /// Two steps rather than one: choose a file, then see what is in it and
-  /// pick from it. Picking a filename alone meant importing blind, with no
-  /// idea how many routines would arrive or which of them already exist
-  /// here under the same name.
+  /// Bring routines in from a file. The flow is shared with the import
+  /// screen, since both offer the same thing and neither should drift from
+  /// the other.
   Future<void> _importRoutines() async {
-    final files = await Exporter.availableRoutineFiles();
-    if (!mounted) return;
-    if (files.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text(
-            'No routine files in the export folder. Any file declaring itself '
-            'as routines counts, whatever it is named.'),
-      ));
-      return;
-    }
-
-    final ref = files.length == 1
-        ? files.first.ref
-        : await showModalBottomSheet<String>(
-            context: context,
-            builder: (c) => SafeArea(
-              child: ListView(
-                shrinkWrap: true,
-                children: [
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(Bv.s4, Bv.s4, Bv.s4, Bv.s2),
-                    child: Text('Which file?'),
-                  ),
-                  ...files.map((f) => ListTile(
-                        leading: const Icon(Icons.file_open_outlined),
-                        title: Text(f.name),
-                        onTap: () => Navigator.pop(c, f.ref),
-                      )),
-                ],
-              ),
-            ),
-          );
-    if (ref == null || !mounted) return;
-
-    Map<String, dynamic> data;
-    try {
-      data = await Exporter.readRoutineFile(ref);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('$e')));
-      }
-      return;
-    }
-
-    final incoming = (data['routines'] as List? ?? const [])
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
-    if (incoming.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('That file holds no routines.')));
-      }
-      return;
-    }
-
-    final existing = _routines.map((r) => r['name'] as String).toSet();
-    final chosen = {for (var i = 0; i < incoming.length; i++) i};
-    if (!mounted) return;
-
-    final ok = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      builder: (c) => StatefulBuilder(
-        builder: (c, setSheet) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(Bv.s4, Bv.s4, Bv.s4, 0),
-                child: Text(
-                    '${incoming.length} routine'
-                    '${incoming.length == 1 ? '' : 's'} in this file',
-                    style: BvType.headlineSm),
-              ),
-              Flexible(
-                child: ListView(
-                  shrinkWrap: true,
-                  children: [
-                    for (var i = 0; i < incoming.length; i++)
-                      Builder(builder: (_) {
-                        final name = (incoming[i]['name'] as String?) ?? '';
-                        final n =
-                            (incoming[i]['exercises'] as List? ?? const []).length;
-                        final clash = existing.contains(name);
-                        return CheckboxListTile(
-                          value: chosen.contains(i),
-                          title: Text(name),
-                          subtitle: Text(
-                            clash
-                                // Said before importing rather than after,
-                                // since the suffix is otherwise a surprise.
-                                ? '$n exercises · already here, arrives as '
-                                    '"$name (imported)"'
-                                : '$n exercises',
-                            style: BvType.bodySm,
-                          ),
-                          onChanged: (v) => setSheet(() =>
-                              v == true ? chosen.add(i) : chosen.remove(i)),
-                        );
-                      }),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(Bv.s3),
-                child: Row(
-                  children: [
-                    TextButton(
-                      onPressed: () => setSheet(() {
-                        if (chosen.length == incoming.length) {
-                          chosen.clear();
-                        } else {
-                          chosen.addAll(
-                              [for (var i = 0; i < incoming.length; i++) i]);
-                        }
-                      }),
-                      child: Text(chosen.length == incoming.length
-                          ? 'None'
-                          : 'All'),
-                    ),
-                    const Spacer(),
-                    FilledButton(
-                      onPressed:
-                          chosen.isEmpty ? null : () => Navigator.pop(c, true),
-                      child: Text('Import ${chosen.length}'),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (ok != true || chosen.isEmpty) return;
-
-    try {
-      final n = await Db.importRoutines({
-        ...data,
-        'routines': [for (final i in chosen) incoming[i]],
-      });
-      await ExerciseLibrary.load();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('$n routine${n == 1 ? '' : 's'} added.')));
-      await _load();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Import failed: $e')));
-      }
-    }
+    final n = await importRoutinesFlow(context);
+    if (n != null) await _load();
   }
 
   Future<void> _routineMenu(Map<String, dynamic> r) async {
