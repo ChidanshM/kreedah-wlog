@@ -1287,19 +1287,25 @@ class Db {
         final kg = (src?['weight_kg'] as num?)?.toDouble() ??
             ovKg ??
             fallbackWeightKg;
+        // The prescribed count lives in one field whatever the set type, so
+        // it is placed wherever that type actually records it: repetitions
+        // for a reps set, seconds for a timed one, steps for a distance one.
+        // Reading it only for reps left a plank prescribed at thirty seconds
+        // arriving blank on its first outing.
+        final target = (ov?['target_reps'] as int?) ?? fallbackReps;
         final reps = (src?['reps'] as int?) ??
-            (setType == SetType.reps
-                ? ((ov?['target_reps'] as int?) ?? fallbackReps)
-                : null);
+            (setType == SetType.reps ? target : null);
+        final duration = (src?['duration_sec'] as int?) ??
+            (setType == SetType.time ? target : null);
+        final steps = (src?['distance_steps'] as int?) ??
+            (setType == SetType.distance ? target : null);
         final rpe = (src?['rpe'] as num?)?.toDouble() ??
             (ov?['target_rpe'] as num?)?.toDouble() ??
             fallbackRpe;
         // Backdated sessions arrive already confirmed where there is
         // something to confirm, since filling one in is transcription.
-        final filled = kg != null ||
-            reps != null ||
-            src?['duration_sec'] != null ||
-            src?['distance_steps'] != null;
+        final filled =
+            kg != null || reps != null || duration != null || steps != null;
         final done = confirmFilled && filled;
         final vol = (setType == SetType.reps && kg != null && reps != null)
             ? kg * reps
@@ -1312,8 +1318,8 @@ class Db {
           'weight_entered': kg == null ? null : fromKg(kg, unit),
           'weight_kg': kg,
           'reps': reps,
-          'duration_sec': src?['duration_sec'],
-          'distance_steps': src?['distance_steps'],
+          'duration_sec': duration,
+          'distance_steps': steps,
           'rpe': rpe,
           // Not rounded: rounding here and multiplying by the rep count
           // multiplies the error. Display rounds instead.
