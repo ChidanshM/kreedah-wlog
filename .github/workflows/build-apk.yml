@@ -2,7 +2,12 @@ name: Build APK
 
 on:
   push:
-    branches: [main]
+    # Every branch builds, so an experiment can be installed and tried
+    # before it is merged. Only main publishes a release: see the condition
+    # on the release step. Other branches leave their files as a workflow
+    # artefact instead, which needs a signed-in account to download but
+    # keeps the releases list meaningful.
+    branches: ['**']
     tags: ['v*']
   workflow_dispatch:
 
@@ -242,8 +247,16 @@ jobs:
           gh release create "$GITHUB_REF_NAME" /tmp/out/*.apk \
             --title "$GITHUB_REF_NAME" --generate-notes
 
+      # Named after the branch, so builds from two experiments can be told
+      # apart in the Actions list rather than both reading the same.
+      - name: Artefact name
+        id: art
+        run: |
+          REF=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
+          echo "name=wlog-$REF-b${{ steps.src.outputs.build }}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/upload-artifact@v4
         with:
-          name: workout-log-apk
+          name: ${{ steps.art.outputs.name }}
           path: /tmp/out/*.apk
           if-no-files-found: error
