@@ -7,6 +7,7 @@ import '../theme.dart';
 import '../util.dart';
 import 'workout_detail_screen.dart';
 import 'workout_screen.dart';
+import 'body_heatmap.dart';
 
 /// Planned days against logged ones.
 ///
@@ -49,6 +50,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
   List<_Planned> _plannedAll = const [];
   List<Map<String, dynamic>> _loggedAll = const [];
   bool _loading = true;
+
+  /// Muscle work across whatever period is on screen: the visible month in
+  /// month view, the visible week in week view.
+  Map<String, int> _muscle = const {};
 
   static DateTime _dayOf(DateTime d) => DateTime(d.year, d.month, d.day);
   static DateTime _monthStart(DateTime d) => DateTime(d.year, d.month);
@@ -103,6 +108,24 @@ class _CalendarScreenState extends State<CalendarScreen> {
       _loggedAll = logged;
       _loading = false;
     });
+    await _loadMuscle();
+  }
+
+  /// The period the calendar is showing, which moves as it is scrolled or
+  /// paged rather than being chosen separately.
+  Future<void> _loadMuscle() async {
+    final anchor = _mode == _Mode.paged ? _paged : _periodStart(_selected);
+    final DateTime from;
+    final DateTime to;
+    if (_view == _View.month) {
+      from = DateTime(anchor.year, anchor.month);
+      to = DateTime(anchor.year, anchor.month + 1, 0);
+    } else {
+      from = _weekStart(anchor);
+      to = from.add(const Duration(days: 6));
+    }
+    final counts = await Db.muscleSets(from, to);
+    if (mounted) setState(() => _muscle = counts);
   }
 
   void _resetScroll() {
@@ -404,6 +427,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
           ? DateTime(_paged.year, _paged.month + by)
           : _paged.add(Duration(days: 7 * by));
     });
+    _loadMuscle();
   }
 
   // ------------------------------------------------------------------ detail
@@ -460,6 +484,19 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 ));
               },
             )),
+        const Divider(height: Bv.s5),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(Bv.s4, 0, Bv.s4, Bv.s2),
+          child: Text(
+            _view == _View.month ? 'WORKED THIS MONTH' : 'WORKED THIS WEEK',
+            style: BvType.label,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: Bv.s4),
+          child: BodyHeatmap(counts: _muscle),
+        ),
+        const SizedBox(height: Bv.s5),
       ],
     );
   }

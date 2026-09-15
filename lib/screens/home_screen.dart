@@ -4,6 +4,7 @@ import '../app_events.dart';
 import '../db.dart';
 import '../theme.dart';
 import '../util.dart';
+import 'body_heatmap_screen.dart';
 import 'equipment_screen.dart';
 import 'library_screen.dart';
 import 'schedule_screen.dart';
@@ -133,6 +134,15 @@ class _HomeScreenState extends State<HomeScreen> {
                   _todaySection(),
                   const SizedBox(height: Bv.s2),
                   _recentSection(),
+                  const Divider(height: Bv.s5),
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(Bv.s4, 0, Bv.s4, Bv.s2),
+                    child: Text('WORKED THIS WEEK', style: BvType.label),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: Bv.s4),
+                    child: const BodyHeatmapPanel(),
+                  ),
                   const Divider(height: Bv.s5),
                   _links(),
                   const Divider(height: Bv.s5),

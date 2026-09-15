@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 import 'util.dart';
@@ -911,6 +914,7 @@ class Db {
       });
     }
     await batch.commit(noResult: true);
+    await refreshMuscleDaysFor(workoutId);
     return workoutId;
   }
 
@@ -1069,6 +1073,7 @@ class Db {
       DELETE FROM workout_exercises
       WHERE workout_id = ?
         AND id NOT IN (SELECT DISTINCT we_id FROM sets)''', [id]);
+    await refreshMuscleDaysFor(id);
   }
 
   /// An ad-hoc session with no routine behind it.
@@ -1091,10 +1096,18 @@ class Db {
         AND id NOT IN (SELECT DISTINCT we_id FROM sets)''', [id]);
     await _db.update('workouts', {'ended_at': isoLocal(DateTime.now())},
         where: 'id = ?', whereArgs: [id]);
+    await refreshMuscleDaysFor(id);
   }
 
-  static Future<void> discardWorkout(int id) =>
-      _db.delete('workouts', where: 'id = ?', whereArgs: [id]);
+  static Future<void> discardWorkout(int id) async {
+    // The days have to be read before the session goes, and recomputed
+    // after, or the totals keep counting a session that no longer exists.
+    final days = await daysOfWorkout(id);
+    await _db.delete('workouts', where: 'id = ?', whereArgs: [id]);
+    if (days.isEmpty) return;
+    final lookup = await primaryMuscles();
+    await recomputeMuscleDays(days, (k) => lookup[k] ?? const []);
+  }
 
   static Future<void> setWorkoutNotes(int id, String notes) =>
       _db.update('workouts', {'notes': notes}, where: 'id = ?', whereArgs: [id]);
@@ -1487,6 +1500,47 @@ class Db {
       'reps': ((row['reps'] as num?) ?? 0).toInt(),
       'top': (row['top'] as num?)?.toDouble(),
     };
+  }
+
+  /// Primary muscles per exercise key, read once from the same data the
+  /// library uses.
+  ///
+  /// Held here rather than passed in, so recomputing muscle totals can happen
+  /// wherever a session changes without every caller needing the library.
+  /// Custom exercises come from the table, and contribute nothing until they
+  /// are given muscles.
+  static Map<String, List<String>>? _primaryMuscles;
+
+  static Future<Map<String, List<String>>> primaryMuscles() async {
+    if (_primaryMuscles != null) return _primaryMuscles!;
+    final out = <String, List<String>>{};
+
+    final raw = await rootBundle.loadString('assets/exercises.json');
+    for (final e in (jsonDecode(raw) as List)) {
+      final m = e as Map<String, dynamic>;
+      out[m['k'] as String] =
+          ((m['p'] as List?) ?? const []).cast<String>().toList();
+    }
+
+    for (final c in await customExercises()) {
+      final p = (c['p'] as String?) ?? '';
+      out[c['k'] as String] =
+          p.isEmpty ? const [] : p.split(',').where((s) => s.isNotEmpty).toList();
+    }
+
+    _primaryMuscles = out;
+    return out;
+  }
+
+  /// Drop the cached lookup after a custom exercise changes.
+  static void invalidateMuscleLookup() => _primaryMuscles = null;
+
+  /// Recompute the stored muscle totals for the days one session covers.
+  static Future<void> refreshMuscleDaysFor(int workoutId) async {
+    final days = await daysOfWorkout(workoutId);
+    if (days.isEmpty) return;
+    final lookup = await primaryMuscles();
+    await recomputeMuscleDays(days, (k) => lookup[k] ?? const []);
   }
 
   // ------------------------------------------------------------ muscle work

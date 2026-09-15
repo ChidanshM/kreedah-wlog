@@ -5,6 +5,7 @@ import '../export.dart';
 import '../library.dart';
 import '../saf.dart';
 import '../theme.dart';
+import 'body_heatmap_screen.dart';
 import 'equipment_screen.dart';
 import 'export_sheet.dart';
 import 'guide_screen.dart';
@@ -265,6 +266,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const GuideScreen())),
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.accessibility_new),
+            title: const Text('Body heatmap'),
+            subtitle: const Text('What you worked, over any span'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () async {
+              await Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const BodyHeatmapScreen()));
+              await _load();
+            },
           ),
           const Divider(),
           ListTile(
