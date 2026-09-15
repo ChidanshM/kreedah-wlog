@@ -5,6 +5,10 @@ import '../library.dart';
 import '../theme.dart';
 import '../util.dart';
 import 'exercise_filter_sheet.dart';
+import 'exercise_history_screen.dart';
+
+/// How the library list is ordered.
+enum _Sort { name, sets, volume }
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key});
@@ -17,6 +21,22 @@ class _LibraryScreenState extends State<LibraryScreen> {
   final _controller = TextEditingController();
   ExerciseFilter _filter = emptyExerciseFilter;
   String _query = '';
+
+  /// How much work each exercise has taken. Drives the sorting and the
+  /// figures on each row, and is what "exercises I've done" tests against.
+  Map<String, ({int sets, double volume, String? last})> _totals = const {};
+  _Sort _sort = _Sort.name;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTotals();
+  }
+
+  Future<void> _loadTotals() async {
+    final t = await Db.exerciseTotals();
+    if (mounted) setState(() => _totals = t);
+  }
 
   Future<void> _openFilters() async {
     final next = await pickExerciseFilter(context, _filter);
@@ -93,12 +113,33 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final results = ExerciseLibrary.search(
+    var results = ExerciseLibrary.search(
       _query,
       equipment: _filter.equipment,
       muscles: _filter.muscles,
+      bodyParts: _filter.bodyParts,
       onlyCustom: _filter.onlyCustom,
+      doneKeys: _totals.keys.toSet(),
+      onlyDone: _filter.onlyDone,
     );
+
+    // Sorting by work done puts everything never logged at the bottom, where
+    // a zero is the honest answer rather than an omission.
+    if (_sort != _Sort.name) {
+      results = [...results]..sort((a, b) {
+          final ta = _totals[a.key];
+          final tb = _totals[b.key];
+          final va = _sort == _Sort.sets
+              ? (ta?.sets ?? 0).toDouble()
+              : (ta?.volume ?? 0);
+          final vb = _sort == _Sort.sets
+              ? (tb?.sets ?? 0).toDouble()
+              : (tb?.volume ?? 0);
+          final c = vb.compareTo(va);
+          return c != 0 ? c : a.name.compareTo(b.name);
+        });
+    }
+
     final pinnedCount = ExerciseLibrary.pinned.length;
     final active = filterIsActive(_filter);
     // What the filters alone leave, so the field never claims to search more
@@ -106,7 +147,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final available = ExerciseLibrary.countMatching(
       equipment: _filter.equipment,
       muscles: _filter.muscles,
+      bodyParts: _filter.bodyParts,
       onlyCustom: _filter.onlyCustom,
+      doneKeys: _totals.keys.toSet(),
+      onlyDone: _filter.onlyDone,
     );
 
     return Scaffold(
@@ -154,6 +198,20 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 children: [
+                  if (_filter.onlyDone)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: InputChip(
+                        label: const Text("I've done"),
+                        onDeleted: () => setState(() => _filter = (
+                              equipment: _filter.equipment,
+                              muscles: _filter.muscles,
+                              bodyParts: _filter.bodyParts,
+                              onlyCustom: _filter.onlyCustom,
+                              onlyDone: false,
+                            )),
+                      ),
+                    ),
                   if (_filter.onlyCustom)
                     Padding(
                       padding: const EdgeInsets.only(right: 6),
@@ -162,10 +220,20 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         onDeleted: () => setState(() => _filter = (
                               equipment: _filter.equipment,
                               muscles: _filter.muscles,
+                              bodyParts: _filter.bodyParts,
                               onlyCustom: false,
+                              onlyDone: _filter.onlyDone,
                             )),
                       ),
                     ),
+                  ..._filter.bodyParts.map((p) => Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: InputChip(
+                          label: Text(p),
+                          onDeleted: () =>
+                              setState(() => _filter.bodyParts.remove(p)),
+                        ),
+                      )),
                   ..._filter.equipment.map((e) => Padding(
                         padding: const EdgeInsets.only(right: 6),
                         child: InputChip(
@@ -174,7 +242,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               setState(() => _filter.equipment.remove(e)),
                         ),
                       )),
-                  ..._filter.muscles.map((m) => Padding(
+                  ...sortMuscles(_filter.muscles).map((m) => Padding(
                         padding: const EdgeInsets.only(right: 6),
                         child: InputChip(
                           label: Text(pretty(m)),
@@ -185,6 +253,27 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 ],
               ),
             ),
+          SizedBox(
+            height: 44,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              children: [
+                (_Sort.name, 'A\u2013Z'),
+                (_Sort.sets, 'Most sets'),
+                (_Sort.volume, 'Most volume'),
+              ]
+                  .map((o) => Padding(
+                        padding: const EdgeInsets.only(right: 6, top: 4),
+                        child: ChoiceChip(
+                          label: Text(o.$2),
+                          selected: _sort == o.$1,
+                          onSelected: (_) => setState(() => _sort = o.$1),
+                        ),
+                      ))
+                  .toList(),
+            ),
+          ),
           if (_query.isEmpty && pinnedCount > 0 && !active)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -213,16 +302,30 @@ class _LibraryScreenState extends State<LibraryScreen> {
               itemBuilder: (context, i) {
                 final ex = results[i];
                 final isPinned = ExerciseLibrary.pinned.contains(ex.key);
+                final t = _totals[ex.key];
                 return ListTile(
                   title: Text(ex.name),
-                  subtitle: Text(
-                    [
-                      if (ex.primaryLabel.isNotEmpty) ex.primaryLabel,
-                      if (ex.equipmentLabel.isNotEmpty) ex.equipmentLabel,
-                      if (ex.custom) 'custom',
-                    ].join(', '),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        [
+                          if (ex.primaryLabel.isNotEmpty) ex.primaryLabel,
+                          if (ex.equipmentLabel.isNotEmpty) ex.equipmentLabel,
+                          if (ex.custom) 'custom',
+                        ].join(', '),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      // Only for what has actually been done. A row of zeroes
+                      // against fifteen hundred entries would be noise.
+                      if (t != null)
+                        Text(
+                          '${t.sets} set${t.sets == 1 ? '' : 's'}'
+                          '${t.volume > 0 ? '  \u00b7  ${num2(t.volume)} kg' : ''}',
+                          style: BvType.bodySm.copyWith(color: Bv.forest700),
+                        ),
+                    ],
                   ),
                   trailing: IconButton(
                     icon: Icon(
@@ -269,6 +372,23 @@ class _LibraryScreenState extends State<LibraryScreen> {
               _line('Garmin code', '${ex.category}/${ex.garminName}'),
             _line('Heaviest logged',
                 best == null ? 'not logged yet' : '${num2(best)} kg'),
+            const SizedBox(height: Bv.s3),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton.icon(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => ExerciseHistoryScreen(
+                      exKey: ex.key,
+                      exName: ex.name,
+                    ),
+                  ));
+                },
+                icon: const Icon(Icons.query_stats),
+                label: const Text('History and bests'),
+              ),
+            ),
             if (ex.custom) ...[
               const SizedBox(height: Bv.s3),
               Row(
@@ -398,7 +518,7 @@ class _CustomExerciseSheetState extends State<_CustomExerciseSheet> {
                   Wrap(
                     spacing: 6,
                     runSpacing: 4,
-                    children: ExerciseLibrary.muscleCodes
+                    children: sortMuscles(ExerciseLibrary.muscleCodes)
                         .map((code) => FilterChip(
                               label: Text(pretty(code)),
                               selected: _muscles.contains(code),

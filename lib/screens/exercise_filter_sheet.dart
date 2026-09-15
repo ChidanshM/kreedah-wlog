@@ -11,17 +11,25 @@ import '../util.dart';
 typedef ExerciseFilter = ({
   Set<String> equipment,
   Set<String> muscles,
+  Set<String> bodyParts,
   bool onlyCustom,
+  bool onlyDone,
 });
 
 const ExerciseFilter emptyExerciseFilter = (
   equipment: <String>{},
   muscles: <String>{},
+  bodyParts: <String>{},
   onlyCustom: false,
+  onlyDone: false,
 );
 
 bool filterIsActive(ExerciseFilter f) =>
-    f.equipment.isNotEmpty || f.muscles.isNotEmpty || f.onlyCustom;
+    f.equipment.isNotEmpty ||
+    f.muscles.isNotEmpty ||
+    f.bodyParts.isNotEmpty ||
+    f.onlyCustom ||
+    f.onlyDone;
 
 Future<ExerciseFilter?> pickExerciseFilter(
   BuildContext context,
@@ -29,7 +37,9 @@ Future<ExerciseFilter?> pickExerciseFilter(
 ) {
   final equipment = {...current.equipment};
   final muscles = {...current.muscles};
+  final bodyParts = {...current.bodyParts};
   var onlyCustom = current.onlyCustom;
+  var onlyDone = current.onlyDone;
 
   return showModalBottomSheet<ExerciseFilter>(
     context: context,
@@ -49,12 +59,34 @@ Future<ExerciseFilter?> pickExerciseFilter(
                   const SizedBox(height: Bv.s2),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
+                    value: onlyDone,
+                    title: const Text("Exercises I've done"),
+                    subtitle: const Text('Hides anything never logged'),
+                    onChanged: (v) => setSheet(() => onlyDone = v),
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
                     value: onlyCustom,
                     title: const Text('Custom exercises'),
                     subtitle: const Text('Only the ones you added yourself'),
                     onChanged: (v) => setSheet(() => onlyCustom = v),
                   ),
                   const Divider(),
+                  Text('BODY PART', style: BvType.label),
+                  const SizedBox(height: Bv.s2),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: BodyPart.all
+                        .map((p) => FilterChip(
+                              label: Text(p),
+                              selected: bodyParts.contains(p),
+                              onSelected: (v) => setSheet(() =>
+                                  v ? bodyParts.add(p) : bodyParts.remove(p)),
+                            ))
+                        .toList(),
+                  ),
+                  const SizedBox(height: Bv.s4),
                   Text('EQUIPMENT', style: BvType.label),
                   const SizedBox(height: Bv.s2),
                   Wrap(
@@ -76,7 +108,9 @@ Future<ExerciseFilter?> pickExerciseFilter(
                   Wrap(
                     spacing: 6,
                     runSpacing: 4,
-                    children: ExerciseLibrary.muscleCodes
+                    // Head to toe rather than alphabetical, so the list reads
+                    // like a body.
+                    children: sortMuscles(ExerciseLibrary.muscleCodes)
                         .map((code) => FilterChip(
                               label: Text(pretty(code)),
                               selected: muscles.contains(code),
@@ -105,7 +139,9 @@ Future<ExerciseFilter?> pickExerciseFilter(
                       onPressed: () => setSheet(() {
                         equipment.clear();
                         muscles.clear();
+                        bodyParts.clear();
                         onlyCustom = false;
+                        onlyDone = false;
                       }),
                       child: const Text('Clear'),
                     ),
@@ -116,7 +152,9 @@ Future<ExerciseFilter?> pickExerciseFilter(
                         (
                           equipment: equipment,
                           muscles: muscles,
+                          bodyParts: bodyParts,
                           onlyCustom: onlyCustom,
+                          onlyDone: onlyDone,
                         ),
                       ),
                       child: const Text('Done'),
