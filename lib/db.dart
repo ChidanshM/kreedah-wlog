@@ -52,6 +52,28 @@ class Db {
       UNIQUE(re_id, set_number)
     )''';
 
+  /// Work done per muscle, per day.
+  ///
+  /// A cache rather than a query, because which muscles an exercise works
+  /// lives in the exercise data file rather than in any table, so no join can
+  /// reach it. Dart computes a day; this stores the answer.
+  ///
+  /// Keyed by day so any window is a sum over a range of dates, and so a
+  /// session being added, changed or removed only invalidates the days it
+  /// touched.
+  ///
+  /// reps is carried but unused for now: sets is what the map colours by, and
+  /// adding the column later would mean another migration for nothing.
+  static const _muscleDayTable = '''
+    CREATE TABLE muscle_day(
+      day TEXT NOT NULL,
+      muscle TEXT NOT NULL,
+      sets INTEGER NOT NULL DEFAULT 0,
+      reps INTEGER NOT NULL DEFAULT 0,
+      volume_kg REAL NOT NULL DEFAULT 0,
+      PRIMARY KEY (day, muscle)
+    )''';
+
   /// A routine placed on the calendar.
   ///
   /// The rule is stored, not the individual days it produces. Occurrences are
@@ -78,7 +100,7 @@ class Db {
     final dir = await getDatabasesPath();
     _db = await openDatabase(
       p.join(dir, 'workout_log.db'),
-      version: 8,
+      version: 9,
       onConfigure: (d) async {
         await d.execute('PRAGMA foreign_keys = ON');
       },
@@ -140,6 +162,10 @@ class Db {
           await d.execute('''
             UPDATE sets SET volume_kg = weight_kg * reps
             WHERE done = 1 AND weight_kg IS NOT NULL AND reps IS NOT NULL''');
+        }
+        // v9: how much each muscle was worked, by day.
+        if (from < 9) {
+          await d.execute(_muscleDayTable);
         }
       },
       onCreate: (d, v) async {
@@ -247,6 +273,7 @@ class Db {
         await d.execute('CREATE TABLE settings(k TEXT PRIMARY KEY, v TEXT)');
         await d.execute(_scheduleTable);
         await d.execute(_routineSetsTable);
+        await d.execute(_muscleDayTable);
 
         await d.execute(
             'CREATE INDEX idx_we_workout ON workout_exercises(workout_id)');

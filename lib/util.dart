@@ -218,26 +218,24 @@ String? targetLabel({
   return 'Target ${parts.join(', ')}';
 }
 
-/// Muscles in anatomical order, head to toe.
+/// The seventeen muscle codes the exercise data actually uses, ordered head
+/// to toe.
 ///
-/// The data lists them alphabetically, which puts calves before chest and
-/// teaches you nothing. Ordering them down the body means a list of muscles
-/// reads like a body rather than like an index.
+/// Counted from the data rather than assumed: there is no neck and no middle
+/// back, so nothing can ever colour them. The list is the full set, which is
+/// also the ceiling on how finely a body map can be drawn — shoulders is one
+/// code, not three deltoid heads.
 const muscleOrder = <String>[
-  'NECK',
   'TRAPS',
   'SHOULDERS',
   'CHEST',
   'LATS',
-  'UPPER_BACK',
-  'MIDDLE_BACK',
+  'LOWER_BACK',
   'BICEPS',
   'TRICEPS',
   'FOREARM',
-  'CORE',
   'ABS',
   'OBLIQUES',
-  'LOWER_BACK',
   'HIPS',
   'GLUTES',
   'ABDUCTORS',
@@ -245,8 +243,32 @@ const muscleOrder = <String>[
   'QUADS',
   'HAMSTRINGS',
   'CALVES',
-  'SHINS',
 ];
+
+/// Readable names. The data's own codes are terse and inconsistent in number
+/// (FOREARM singular, CALVES plural), so labels are given rather than
+/// derived.
+const muscleLabels = <String, String>{
+  'TRAPS': 'Trapezius',
+  'SHOULDERS': 'Shoulders',
+  'CHEST': 'Chest',
+  'LATS': 'Lats',
+  'LOWER_BACK': 'Lower back',
+  'BICEPS': 'Biceps',
+  'TRICEPS': 'Triceps',
+  'FOREARM': 'Forearms',
+  'ABS': 'Abs',
+  'OBLIQUES': 'Obliques',
+  'HIPS': 'Hip flexors',
+  'GLUTES': 'Glutes',
+  'ABDUCTORS': 'Abductors',
+  'ADDUCTORS': 'Adductors',
+  'QUADS': 'Quads',
+  'HAMSTRINGS': 'Hamstrings',
+  'CALVES': 'Calves',
+};
+
+String muscleLabel(String code) => muscleLabels[code] ?? pretty(code);
 
 /// Where an unlisted code sorts: after everything known, alphabetically
 /// among themselves, so a code added to the data later is never lost.
@@ -270,7 +292,6 @@ List<String> sortMuscles(Iterable<String> codes) {
 /// more natural question than "show me biceps or triceps or forearm work".
 /// Listed head to toe like the muscles themselves.
 class BodyPart {
-  static const neck = 'Neck';
   static const shoulders = 'Shoulders';
   static const chest = 'Chest';
   static const back = 'Back';
@@ -280,17 +301,16 @@ class BodyPart {
   static const legs = 'Legs';
 
   /// In the order they appear down the body.
-  static const all = [neck, shoulders, chest, back, arms, core, hips, legs];
+  static const all = [shoulders, chest, back, arms, core, hips, legs];
 
   static const muscles = <String, List<String>>{
-    neck: ['NECK'],
     shoulders: ['SHOULDERS', 'TRAPS'],
     chest: ['CHEST'],
-    back: ['LATS', 'UPPER_BACK', 'MIDDLE_BACK', 'LOWER_BACK'],
+    back: ['LATS', 'LOWER_BACK'],
     arms: ['BICEPS', 'TRICEPS', 'FOREARM'],
-    core: ['CORE', 'ABS', 'OBLIQUES'],
+    core: ['ABS', 'OBLIQUES'],
     hips: ['HIPS', 'GLUTES', 'ABDUCTORS', 'ADDUCTORS'],
-    legs: ['QUADS', 'HAMSTRINGS', 'CALVES', 'SHINS'],
+    legs: ['QUADS', 'HAMSTRINGS', 'CALVES'],
   };
 
   /// Trapezius sits with the shoulders and the lower back with the back,
