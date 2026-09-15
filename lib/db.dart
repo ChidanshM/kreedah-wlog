@@ -285,6 +285,22 @@ class Db {
         await d.execute('CREATE INDEX idx_workouts_start ON workouts(started_at)');
       },
     );
+
+    await _ensureMuscleDaysBuilt();
+  }
+
+  /// Fill the muscle totals once, for training logged before the table
+  /// existed.
+  ///
+  /// Without this the body map stays empty until a session is next saved or
+  /// edited, so months of history would read as nothing worked rather than
+  /// as nothing recorded.
+  static Future<void> _ensureMuscleDaysBuilt() async {
+    const key = 'muscle_day_built_v1';
+    if (await flag(key)) return;
+    final lookup = await primaryMuscles();
+    await rebuildAllMuscleDays((k) => lookup[k] ?? const []);
+    await setSetting(key, '1');
   }
 
   // ---------------------------------------------------------------- settings

@@ -105,17 +105,25 @@ class BodyHeatmap extends StatelessWidget {
       );
 }
 
-/// Nothing logged stays grey. Everything else runs blue to red across the
-/// range actually present, so the scale always uses its full span.
+/// Nothing logged stays grey. Everything else runs yellow through orange to
+/// red across the range actually present, so the scale always uses its full
+/// span.
+///
+/// A single hue would only vary in lightness, which the eye reads as depth
+/// rather than as quantity. Yellow to red is the ramp used for heat and for
+/// height, and it reads in one direction without needing the legend.
 Color _colourFor(int count, int max) {
   if (count <= 0) return Bv.sand400;
-  if (max <= 1) return const Color(0xFFD24B3E);
+  if (max <= 1) return const Color(0xFFD7342A);
+
+  const low = Color(0xFFF7D154);
+  const mid = Color(0xFFE88A1F);
+  const high = Color(0xFFD7342A);
+
   final t = ((count - 1) / (max - 1)).clamp(0.0, 1.0);
-  return Color.lerp(
-    const Color(0xFF3B8BD4),
-    const Color(0xFFD24B3E),
-    t,
-  )!;
+  return t < 0.5
+      ? Color.lerp(low, mid, t * 2)!
+      : Color.lerp(mid, high, (t - 0.5) * 2)!;
 }
 
 class _BodyPainter extends CustomPainter {
@@ -202,9 +210,9 @@ class _BodyPainter extends CustomPainter {
         style: TextStyle(
           fontSize: size,
           fontWeight: FontWeight.w600,
-          // Dark on the pale end of the scale, light on the hot end, so the
-          // figure stays readable the whole way along it.
-          color: Bv.cream100,
+          // Dark against the yellow end, light against the red, so the
+          // figure stays readable the whole way along the ramp.
+          color: const Color(0xFF3A2A08),
           height: 1,
         ),
       ),
