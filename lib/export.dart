@@ -123,24 +123,18 @@ class Exporter {
     return (csv: buf.toString(), rows: rows.length);
   }
 
+  /// A full backup.
+  ///
+  /// The list of tables lives with the schema rather than here, so a table
+  /// added later cannot be silently left out of every backup, which is how
+  /// schedules and per-set targets came to be missing from all of them.
   static Future<String> buildJson() async {
-    const tables = [
-      'routines',
-      'routine_exercises',
-      'workouts',
-      'workout_exercises',
-      'sets',
-      'equipment',
-      'custom_exercises',
-      'pinned',
-      'settings',
-    ];
     final data = <String, dynamic>{
       'format': 'workout_log_backup',
-      'version': 1,
+      'version': 2,
       'exported_at': isoLocal(DateTime.now()),
     };
-    for (final t in tables) {
+    for (final t in Db.backupTables) {
       data[t] = await Db.dumpTable(t);
     }
     return const JsonEncoder.withIndent('  ').convert(data);
@@ -222,7 +216,8 @@ class Exporter {
   }
 
   /// [ref] is either a document URI from the chosen folder or a file path.
-  static Future<void> restoreFrom(String ref) async {
+  /// [only] restricts which tables are brought back.
+  static Future<int> restoreFrom(String ref, {Set<String>? only}) async {
     final raw = ref.startsWith('content://')
         ? await Saf.readFile(ref)
         : await File(ref).readAsString();
@@ -230,7 +225,7 @@ class Exporter {
     if (data['format'] != 'workout_log_backup') {
       throw const FormatException('Not a workout log backup file.');
     }
-    await Db.restore(data);
+    return Db.restore(data, only: only);
   }
 
   /// One file per session, in the shape the platform merges with Garmin.
@@ -336,53 +331,111 @@ class Exporter {
     };
   }
 
-  /// strnth-20251218-r_u_002_b, or the routine name when there is no id.
+  /// workout-20251218_1804-push_a. The time is dropped where none was
+  /// recorded, rather than printed as midnight.
   static String _sessionFileStem(Map<String, dynamic> w) {
     final started = parseIso(w['started_at'] as String?);
-    final date = started == null ? 'undated' : ymd(started).replaceAll('-', '');
+    final known = (w['time_known'] as int? ?? 1) == 1;
+    final stamp = started == null
+        ? 'undated'
+        : known
+            ? '${ymd(started).replaceAll('-', '')}_'
+                '${started.hour.toString().padLeft(2, '0')}'
+                '${started.minute.toString().padLeft(2, '0')}'
+            : ymd(started).replaceAll('-', '');
     final slug = (w['routine_name'] as String)
         .toLowerCase()
         .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
         .replaceAll(RegExp(r'^_|_$'), '');
-    return 'strnth-$date-$slug';
+    return 'workout-$stamp-$slug';
   }
 
-  /// Write one file per session over the chosen span.
-  static Future<({int files, String where, bool reachable})> exportSessions({
+  /// workout-all-20251101_20251218, naming the span the file actually covers
+  /// rather than the one that was asked for.
+  static String _combinedFileStem(List<Map<String, dynamic>> workouts) {
+    final dates = workouts
+        .map((w) => parseIso(w['started_at'] as String?))
+        .whereType<DateTime>()
+        .toList()
+      ..sort();
+    if (dates.isEmpty) return 'workout-all-empty';
+    final a = ymd(dates.first).replaceAll('-', '');
+    final b = ymd(dates.last).replaceAll('-', '');
+    return a == b ? 'workout-all-$a' : 'workout-all-${a}_$b';
+  }
+
+  /// Write sessions out: one file each, or all of them in one.
+  ///
+  /// [ids] names particular sessions and overrides the filters; without it
+  /// the span and routines decide. [combined] writes a single file holding
+  /// every session rather than one apiece.
+  static Future<({int files, int sessions, String where, bool reachable})>
+      exportSessions({
     DateTime? from,
     DateTime? to,
     List<int>? routineIds,
+    List<int>? ids,
+    bool combined = false,
   }) async {
-    final workouts = await Db.workoutHistory(
-      limit: 2000,
-      fromIso: from == null ? null : isoLocal(from),
-      toIso: to == null ? null : isoLocal(to),
-      routineIds: routineIds,
-    );
+    final workouts = (ids != null && ids.isNotEmpty)
+        ? await Db.workoutsByIds(ids)
+        : await Db.workoutHistory(
+            limit: 2000,
+            fromIso: from == null ? null : isoLocal(from),
+            toIso: to == null ? null : isoLocal(to),
+            routineIds: routineIds,
+          );
 
     final tree = await Db.setting(exportTreeKey);
     final viaTree = await Saf.hasAccess(tree);
     final dir = viaTree ? null : await exportDir();
     final encoder = const JsonEncoder.withIndent('  ');
+    final where = viaTree ? await Saf.folderName(tree!) : dir!.path;
 
-    var written = 0;
-    for (final w in workouts) {
-      final data = await buildSessionJson(w['id'] as int);
-      final name = '${_sessionFileStem(w)}.json';
-      final body = encoder.convert(data);
+    Future<void> write(String name, String body) async {
       if (viaTree) {
         await Saf.writeFile(
             tree: tree!, name: name, mime: 'application/json', content: body);
       } else {
         await File('${dir!.path}/$name').writeAsString(body);
       }
+    }
+
+    if (combined) {
+      final sessions = <Map<String, dynamic>>[];
+      for (final w in workouts) {
+        sessions.add(await buildSessionJson(w['id'] as int));
+      }
+      await write(
+        '${_combinedFileStem(workouts)}.json',
+        encoder.convert({
+          'format': 'workout_log_sessions',
+          'version': 1,
+          'exported_at': isoLocal(DateTime.now()),
+          'count': sessions.length,
+          'sessions': sessions,
+        }),
+      );
+      return (
+        files: 1,
+        sessions: sessions.length,
+        where: where,
+        reachable: viaTree
+      );
+    }
+
+    var written = 0;
+    for (final w in workouts) {
+      final data = await buildSessionJson(w['id'] as int);
+      await write('${_sessionFileStem(w)}.json', encoder.convert(data));
       written++;
     }
 
     return (
       files: written,
-      where: viaTree ? await Saf.folderName(tree!) : dir!.path,
-      reachable: viaTree,
+      sessions: written,
+      where: where,
+      reachable: viaTree
     );
   }
 

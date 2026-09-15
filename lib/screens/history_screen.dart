@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../app_events.dart';
 import '../db.dart';
+import '../export.dart';
 import '../theme.dart';
 import '../util.dart';
 import 'session_time_sheet.dart';
@@ -29,6 +30,91 @@ class _HistoryScreenState extends State<HistoryScreen> {
   final _routineIds = <int>{};
 
   bool get _filtered => _span != _Span.all || _routineIds.isNotEmpty;
+
+  /// Sessions ticked for export. Non-null means selection mode is on, which
+  /// is a different mode rather than a state of the list: while choosing,
+  /// tapping a session ticks it instead of opening it.
+  Set<int>? _chosen;
+
+  bool get _choosing => _chosen != null;
+
+  void _startChoosing([int? first]) => setState(
+      () => _chosen = {if (first != null) first});
+
+  void _stopChoosing() => setState(() => _chosen = null);
+
+  void _toggle(int id) => setState(() {
+        if (!_chosen!.remove(id)) _chosen!.add(id);
+      });
+
+  /// Write the chosen sessions out, or every session the filters leave when
+  /// none are ticked.
+  Future<void> _exportChosen({required bool combined}) async {
+    final ids = _chosen?.toList() ?? const <int>[];
+    final r = _range();
+    try {
+      final res = await Exporter.exportSessions(
+        ids: ids.isEmpty ? null : ids,
+        from: ids.isEmpty ? r.from : null,
+        to: ids.isEmpty ? r.to : null,
+        routineIds:
+            ids.isEmpty && _routineIds.isNotEmpty ? _routineIds.toList() : null,
+        combined: combined,
+      );
+      if (!mounted) return;
+      _stopChoosing();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(res.sessions == 0
+            ? 'Nothing to export.'
+            : combined
+                ? '${res.sessions} session'
+                    '${res.sessions == 1 ? '' : 's'} in one file, in ${res.where}.'
+                : '${res.files} file${res.files == 1 ? '' : 's'} written '
+                    'to ${res.where}.'),
+      ));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Export failed: $e')));
+      }
+    }
+  }
+
+  Future<void> _exportMenu() async {
+    final n = _chosen?.length ?? 0;
+    final what = n == 0 ? 'everything shown' : '$n selected';
+    final combined = await showModalBottomSheet<bool>(
+      context: context,
+      builder: (c) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Bv.s4, Bv.s4, Bv.s4, Bv.s2),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Export $what', style: BvType.headlineSm),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.description_outlined),
+              title: const Text('One file each'),
+              subtitle: const Text('workout-date-routine.json'),
+              onTap: () => Navigator.pop(c, false),
+            ),
+            ListTile(
+              leading: const Icon(Icons.folder_zip_outlined),
+              title: const Text('All in one file'),
+              subtitle: const Text('workout-all-span.json'),
+              onTap: () => Navigator.pop(c, true),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (combined == null) return;
+    await _exportChosen(combined: combined);
+  }
 
   @override
   void initState() {
@@ -275,20 +361,52 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Logbook'),
+        leading: _choosing
+            ? IconButton(
+                icon: const Icon(Icons.close),
+                tooltip: 'Done selecting',
+                onPressed: _stopChoosing,
+              )
+            : null,
+        title: Text(_choosing
+            ? '${_chosen!.length} selected'
+            : 'Logbook'),
         actions: [
-          IconButton(
-            tooltip: 'Filter',
-            icon: Icon(_filtered ? Icons.filter_alt : Icons.filter_alt_outlined),
-            onPressed: _openFilters,
-          ),
+          if (_choosing) ...[
+            IconButton(
+              tooltip: 'Select all shown',
+              icon: const Icon(Icons.select_all),
+              onPressed: () => setState(() => _chosen!
+                ..clear()
+                ..addAll(_workouts.map((w) => w['id'] as int))),
+            ),
+            IconButton(
+              tooltip: 'Export',
+              icon: const Icon(Icons.ios_share),
+              onPressed: _exportMenu,
+            ),
+          ] else ...[
+            IconButton(
+              tooltip: 'Select sessions',
+              icon: const Icon(Icons.checklist),
+              onPressed: _workouts.isEmpty ? null : () => _startChoosing(),
+            ),
+            IconButton(
+              tooltip: 'Filter',
+              icon: Icon(
+                  _filtered ? Icons.filter_alt : Icons.filter_alt_outlined),
+              onPressed: _openFilters,
+            ),
+          ],
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _addPast,
-        icon: const Icon(Icons.add),
-        label: const Text('Past session'),
-      ),
+      floatingActionButton: _choosing
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: _addPast,
+              icon: const Icon(Icons.add),
+              label: const Text('Past session'),
+            ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _workouts.isEmpty
@@ -313,8 +431,18 @@ class _HistoryScreenState extends State<HistoryScreen> {
                       final id = w['id'] as int;
                       final started = parseIso(w['started_at'] as String?);
                       final vol = _volumes[id] ?? 0;
+                      final ticked = _chosen?.contains(id) ?? false;
                       return Card(
+                        color: ticked ? Bv.sage200 : null,
                         child: ListTile(
+                          leading: _choosing
+                              ? Icon(
+                                  ticked
+                                      ? Icons.check_circle
+                                      : Icons.radio_button_unchecked,
+                                  color: ticked ? Bv.forest600 : Bv.ink600,
+                                )
+                              : null,
                           title: Text(w['routine_name'] as String),
                           subtitle: Text(started == null
                               ? '\u2014'
@@ -325,12 +453,23 @@ class _HistoryScreenState extends State<HistoryScreen> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Text('${num2(vol)} kg', style: BvType.bodySm),
-                              const SizedBox(width: 4),
-                              const Icon(Icons.chevron_right,
-                                  color: Bv.ink600, size: 20),
+                              if (!_choosing) ...[
+                                const SizedBox(width: 4),
+                                const Icon(Icons.chevron_right,
+                                    color: Bv.ink600, size: 20),
+                              ],
                             ],
                           ),
+                          // Holding a session starts selecting, which is how
+                          // a list that is usually read becomes one that can
+                          // be picked from without a mode switch first.
+                          onLongPress:
+                              _choosing ? null : () => _startChoosing(id),
                           onTap: () async {
+                            if (_choosing) {
+                              _toggle(id);
+                              return;
+                            }
                             await Navigator.of(context).push(MaterialPageRoute(
                               builder: (_) => WorkoutDetailScreen(workoutId: id),
                             ));

@@ -978,6 +978,19 @@ class Db {
         .toList();
   }
 
+  /// Particular sessions, newest first. Used when exporting a selection
+  /// rather than a span.
+  static Future<List<Map<String, dynamic>>> workoutsByIds(List<int> ids) async {
+    if (ids.isEmpty) return const [];
+    final marks = List.filled(ids.length, '?').join(', ');
+    return (await _db.query('workouts',
+            where: 'id IN ($marks)',
+            whereArgs: ids,
+            orderBy: 'started_at DESC'))
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+  }
+
   /// Rename a session without unlinking it.
   ///
   /// Only the label changes; routine_id stays put, so the session still
@@ -1886,18 +1899,50 @@ class Db {
     return info.map((r) => r['name'] as String).toSet();
   }
 
-  static Future<void> restore(Map<String, dynamic> data) async {
-    const tables = [
-      'sets',
-      'workout_exercises',
-      'workouts',
-      'routine_exercises',
-      'routines',
-      'equipment',
-      'custom_exercises',
-      'pinned',
-      'settings',
-    ];
+  /// Every table a backup carries, children first.
+  ///
+  /// Read in this order when clearing and in reverse when inserting, so a
+  /// parent always exists before anything points at it.
+  ///
+  /// This list was hand-written in two places and drifted: schedules and
+  /// per-set targets were added to the schema and never added here, so every
+  /// backup silently discarded them. One list now, used by both.
+  ///
+  /// muscle_day is deliberately absent. It is derived from the sessions, so
+  /// carrying it would be storing the same facts twice; it is rebuilt after
+  /// a restore instead.
+  static const backupTables = [
+    'sets',
+    'workout_exercises',
+    'workouts',
+    'routine_sets',
+    'routine_exercises',
+    'schedule',
+    'routines',
+    'equipment',
+    'custom_exercises',
+    'pinned',
+    'settings',
+  ];
+
+  /// Bring a backup back in.
+  ///
+  /// [only] restricts it to particular tables, for restoring one part of a
+  /// backup without disturbing the rest. Whatever is restored is replaced
+  /// wholesale rather than merged: merging would mean deciding what happens
+  /// to a row that exists in both, and any answer to that quietly loses
+  /// something.
+  ///
+  /// Returns how many rows were written.
+  static Future<int> restore(
+    Map<String, dynamic> data, {
+    Set<String>? only,
+  }) async {
+    final tables =
+        backupTables.where((t) => only == null || only.contains(t)).toList();
+    if (tables.isEmpty) return 0;
+
+    var written = 0;
     await _db.transaction((txn) async {
       for (final t in tables) {
         await txn.delete(t);
@@ -1915,9 +1960,18 @@ class Db {
           if (clean.isEmpty) continue;
           await txn.insert(t, clean,
               conflictAlgorithm: ConflictAlgorithm.replace);
+          written++;
         }
       }
     });
+
+    // Derived from what was just restored, and not carried in the file.
+    // Without this the body map reads as nothing worked on a restored
+    // device.
+    _primaryMuscles = null;
+    final lookup = await primaryMuscles();
+    await rebuildAllMuscleDays((k) => lookup[k] ?? const []);
+    return written;
   }
 
   /// Every confirmed set, flattened, for the CSV export.

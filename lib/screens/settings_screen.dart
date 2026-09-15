@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../db.dart';
 import '../export.dart';
-import '../library.dart';
 import '../saf.dart';
 import '../theme.dart';
 import 'body_heatmap_screen.dart';
@@ -10,6 +9,7 @@ import 'equipment_screen.dart';
 import 'export_sheet.dart';
 import 'guide_screen.dart';
 import 'library_screen.dart';
+import 'restore_screen.dart';
 import 'schedule_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -183,76 +183,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _restore() async {
-    final backups = await Exporter.availableBackups();
-    if (!mounted) return;
-    if (backups.isEmpty) {
-      showDialog(
-        context: context,
-        builder: (c) => AlertDialog(
-          title: const Text('No backups found'),
-          content: Text(_tree == null
-              ? 'Choose an export folder first, then put a backup file in it.'
-              : 'No .json backup in $_folderLabel. Put one there and try again.'),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(c), child: const Text('OK')),
-          ],
-        ),
-      );
-      return;
-    }
-
-    final chosen = await showModalBottomSheet<String>(
-      context: context,
-      builder: (c) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: backups
-              .map((b) => ListTile(
-                    leading: const Icon(Icons.restore_page_outlined),
-                    title: Text(b.name),
-                    onTap: () => Navigator.pop(c, b.ref),
-                  ))
-              .toList(),
-        ),
-      ),
-    );
-    if (chosen == null || !mounted) return;
-
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Replace everything?'),
-        content: const Text(
-            'Restoring wipes the current log and replaces it with the backup.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Restore')),
-        ],
-      ),
-    );
-    if (ok != true) return;
-
-    try {
-      await Exporter.restoreFrom(chosen);
-      await ExerciseLibrary.load();
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Restored.')));
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Restore failed: $e')));
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -349,9 +279,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           ListTile(
             leading: const Icon(Icons.settings_backup_restore),
-            title: const Text('Restore from backup'),
-            subtitle: const Text('Replaces the current log'),
-            onTap: _restore,
+            title: const Text('Restore'),
+            subtitle: const Text('Bring back a backup, whole or in part'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () async {
+              await Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const RestoreScreen()));
+              await _load();
+            },
           ),
           const Divider(),
           ListTile(
@@ -370,10 +305,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Padding(
             padding: const EdgeInsets.fromLTRB(Bv.s4, Bv.s2, Bv.s4, Bv.s6),
             child: Text(
-              'Weight rule: kg is stored to 2 decimals and every summary '
-              'statistic is in kg. The screen keeps whatever unit you typed, '
-              'and the CSV carries an lb column filled in only for the sets '
-              'you actually entered in lb.',
+              'Weight rule: kilograms are stored exactly and every summary '
+              'figure is in kilograms. The screen keeps whatever unit you '
+              'typed, and the spreadsheet carries a pounds column filled in '
+              'only for the sets actually entered in pounds.',
               style: BvType.bodySm,
             ),
           ),

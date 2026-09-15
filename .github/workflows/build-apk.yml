@@ -271,6 +271,47 @@ jobs:
           gh release create "$GITHUB_REF_NAME" /tmp/out/*.apk \
             --title "$GITHUB_REF_NAME" --generate-notes
 
+      # A branch publishes too, so a build can be installed straight from a
+      # phone rather than downloaded as a zip behind a login. Marked as a
+      # prerelease and tagged by branch, so it never becomes the latest
+      # release and never displaces a real one. The tag is reused, since an
+      # experiment does not need its history kept.
+      - name: Publish the branch build
+        if: github.ref != 'refs/heads/main' && github.ref_type != 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V='${{ steps.src.outputs.version }}'
+          BUILD='${{ steps.src.outputs.build }}'
+          SHA='${{ steps.src.outputs.sha }}'
+          BRANCH="${GITHUB_REF_NAME}"
+          TAG="branch-$(echo "$BRANCH" | tr '/' '-')"
+
+          cat > /tmp/branch-notes.md <<EOF
+          Test build from the **$BRANCH** branch. Not a release.
+
+          Installs as its own application alongside the real one, with the
+          branch shown on the launcher and its own separate data. Uninstalling
+          it takes only its own database.
+
+          | | |
+          | --- | --- |
+          | Branch | \`$BRANCH\` |
+          | Version | $V |
+          | Build | $BUILD |
+          | Commit | \`$SHA\` |
+
+          Install **wlog-$V-b$BUILD-arm64-v8a.apk**.
+          EOF
+
+          # Replaced rather than added to: only the current state of an
+          # experiment is of any interest.
+          gh release delete "$TAG" --cleanup-tag --yes 2>/dev/null || true
+          gh release create "$TAG" /tmp/out/*.apk \
+            --title "$BRANCH (build $BUILD)" \
+            --prerelease \
+            --notes-file /tmp/branch-notes.md
+
       # Named after the branch, so builds from two experiments can be told
       # apart in the Actions list rather than both reading the same.
       - name: Artefact name
