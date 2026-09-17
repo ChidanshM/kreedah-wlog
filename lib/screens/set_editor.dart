@@ -18,6 +18,8 @@ Future<bool?> editSet({
   required String unit,
   required int setNumber,
   required List<Map<String, dynamic>> rows,
+  double? targetRpeMin,
+  double? targetRpeMax,
 }) {
   return showModalBottomSheet<bool>(
     context: context,
@@ -29,6 +31,8 @@ Future<bool?> editSet({
       unit: unit,
       setNumber: setNumber,
       rows: rows,
+      targetRpeMin: targetRpeMin,
+      targetRpeMax: targetRpeMax,
     ),
   );
 }
@@ -42,6 +46,8 @@ class SetEditorSheet extends StatefulWidget {
     required this.unit,
     required this.setNumber,
     required this.rows,
+    this.targetRpeMin,
+    this.targetRpeMax,
   });
 
   final String exerciseName;
@@ -51,8 +57,137 @@ class SetEditorSheet extends StatefulWidget {
   final int setNumber;
   final List<Map<String, dynamic>> rows;
 
+  /// What the routine asked for, used to decide which part of the effort
+  /// scale is worth showing.
+  final double? targetRpeMin;
+  final double? targetRpeMax;
+
   @override
   State<SetEditorSheet> createState() => _SetEditorSheetState();
+}
+
+/// Which of the two numbers the upper scale is editing. Effort has a scale
+/// of its own and is not one of these.
+enum _Field { weight, value }
+
+/// A row of values with a pill on the selected one.
+///
+/// Seven are in view at a time; the rest are a drag away. Tapping a value
+/// selects it, dragging moves the row rather than the selection, so the
+/// whole scale is reachable without the row being too cramped to read.
+class _PillScale extends StatefulWidget {
+  const _PillScale({
+    super.key,
+    required this.values,
+    required this.value,
+    required this.onChanged,
+    required this.format,
+    required this.startAt,
+  });
+
+  /// How many are in view. Seven is as many as stay readable at the size
+  /// the numbers are set in, and the same for every scale so they line up.
+  static const visible = 7;
+
+  final List<double> values;
+  final double? value;
+  final ValueChanged<double> onChanged;
+  final String Function(double) format;
+
+  /// Which value the row opens on, when nothing is chosen yet.
+  final int startAt;
+
+  @override
+  State<_PillScale> createState() => _PillScaleState();
+}
+
+class _PillScaleState extends State<_PillScale> {
+  final _scroll = ScrollController();
+  bool _placed = false;
+
+  int? get _index {
+    final v = widget.value;
+    if (v == null) return null;
+    final i = widget.values.indexOf(v);
+    return i == -1 ? null : i;
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = _index;
+
+    return LayoutBuilder(
+      builder: (context, box) {
+        final step = box.maxWidth / _PillScale.visible;
+
+        // Opened on whatever was chosen, or on what the routine asked for.
+        // Done once, so scrolling away and tapping does not snap back.
+        if (!_placed) {
+          _placed = true;
+          final want = selected ?? widget.startAt;
+          final offset = ((want - _PillScale.visible ~/ 2) * step)
+              .clamp(0.0, double.infinity);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_scroll.hasClients) {
+              _scroll.jumpTo(
+                  offset.clamp(0.0, _scroll.position.maxScrollExtent));
+            }
+          });
+        }
+
+        return Container(
+          height: 52,
+          decoration: BoxDecoration(
+            color: Bv.sand400,
+            borderRadius: BorderRadius.circular(Bv.rMd),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: ListView.builder(
+            controller: _scroll,
+            scrollDirection: Axis.horizontal,
+            itemExtent: step,
+            itemCount: widget.values.length,
+            itemBuilder: (context, i) {
+              final on = i == selected;
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  widget.onChanged(widget.values[i]);
+                },
+                child: Container(
+                  margin: const EdgeInsets.symmetric(
+                      horizontal: 2, vertical: 5),
+                  decoration: on
+                      ? BoxDecoration(
+                          color: Bv.sage200,
+                          borderRadius: BorderRadius.circular(Bv.rMd),
+                          border:
+                              Border.all(color: Bv.forest600, width: 1.5),
+                        )
+                      : null,
+                  child: Center(
+                    child: Text(
+                      widget.format(widget.values[i]),
+                      style: on
+                          ? BvType.metric.copyWith(color: Bv.forest800)
+                          : BvType.metric.copyWith(color: Bv.ink600),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _SetEditorSheetState extends State<SetEditorSheet> {
@@ -68,63 +203,29 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
   /// default.
   final _unit = <int, String>{};
 
+  /// Focus for each number field, so tapping a cell that is already chosen
+  /// puts the cursor in it.
+  final _nodes = <String, FocusNode>{};
+
+  /// Which cell is being typed into, as "rowId-field". A cell shows its
+  /// scale when first tapped and only opens the keyboard when tapped again,
+  /// so reaching for the scale never covers half the sheet.
+  String? _typing;
+
+  FocusNode _nodeFor(String key) =>
+      _nodes.putIfAbsent(key, () => FocusNode());
+
   int _focusedRow = 0;
+
+  /// Which of the three the scale beneath is driving. Tapping any of them
+  /// moves it, so there is one scale rather than three, and it is always
+  /// the one for the number being changed.
+  _Field _field = _Field.weight;
 
   /// Equipment weights exactly as recorded, each with its own unit. Never
   /// converted: a converted chip enters a converted number, which is how
   /// 32.5 kg became 71.65 lb in the log.
   List<({double weight, String unit})> _chipWeights = const [];
-
-  /// The rotating counter and the text field are two views of one value.
-  /// `_fromWheel` breaks the feedback loop when one updates the other.
-  late final List<int> _items = _buildItems();
-  late final FixedExtentScrollController _wheel;
-  bool _fromWheel = false;
-
-  List<int> _buildItems() {
-    switch (widget.setType) {
-      case SetType.time:
-        return [for (var s = 5; s <= 300; s += 5) s];
-      case SetType.distance:
-        return [for (var s = 5; s <= 200; s += 5) s];
-      default:
-        return [for (var r = 1; r <= 40; r++) r];
-    }
-  }
-
-  /// Nearest wheel position to whatever is typed. Falls back to a sensible
-  /// starting point when the field is empty.
-  int _indexFor(String text) {
-    var v = int.tryParse(text.trim());
-    v ??= switch (widget.setType) {
-      SetType.time => 30,
-      SetType.distance => 20,
-      _ => 8,
-    };
-    var best = 0, bestD = 1 << 30;
-    for (var i = 0; i < _items.length; i++) {
-      final d = (_items[i] - v).abs();
-      if (d < bestD) {
-        bestD = d;
-        best = i;
-      }
-    }
-    return best;
-  }
-
-  void _syncWheelFromText() {
-    if (_fromWheel || !_wheel.hasClients) return;
-    final ctl = _value[_focusedRow];
-    if (ctl == null) return;
-    final i = _indexFor(ctl.text);
-    if (_wheel.selectedItem != i) _wheel.jumpToItem(i);
-  }
-
-  void _focusRow(int id) {
-    if (_focusedRow == id) return;
-    setState(() => _focusedRow = id);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _syncWheelFromText());
-  }
 
   @override
   void initState() {
@@ -138,11 +239,6 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
       _unit[id] = (r['entry_unit'] as String?) ?? widget.unit;
     }
     _focusedRow = widget.rows.first['id'] as int;
-    _wheel = FixedExtentScrollController(
-        initialItem: _indexFor(_value[_focusedRow]!.text));
-    for (final c in _value.values) {
-      c.addListener(_syncWheelFromText);
-    }
     _loadChips();
   }
 
@@ -162,12 +258,13 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
 
   @override
   void dispose() {
-    _wheel.dispose();
+    for (final n in _nodes.values) {
+      n.dispose();
+    }
     for (final c in _weight.values) {
       c.dispose();
     }
     for (final c in _value.values) {
-      c.removeListener(_syncWheelFromText);
       c.dispose();
     }
     super.dispose();
@@ -218,6 +315,21 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
     }
   }
 
+  /// Where the effort row opens.
+  ///
+  /// On what the routine asked for, so the prescription is under your thumb,
+  /// or on six when nothing was asked. The whole scale stays reachable by
+  /// dragging: what is prescribed decides the starting place, not the limit.
+  int get _rpeStart {
+    final lo = widget.targetRpeMin;
+    if (lo != null) {
+      final i = rpeChoices.indexWhere((v) => v >= lo);
+      if (i >= 0) return i;
+    }
+    final six = rpeChoices.indexOf(6.0);
+    return six < 0 ? 0 : six;
+  }
+
   Future<void> _save({required bool done}) async {
     for (final r in widget.rows) {
       final id = r['id'] as int;
@@ -258,13 +370,16 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
             Text(widget.exerciseName,
                 style: theme.textTheme.bodySmall, maxLines: 1),
             const SizedBox(height: 16),
-            ...widget.rows.map(_sideBlock),
+            _setTable(),
             _weightChips(),
-            const SizedBox(height: 16),
-            _wheelPicker(),
-            const SizedBox(height: 16),
-            _rpeBlock(),
-            const SizedBox(height: 20),
+            const SizedBox(height: 14),
+            // Two scales, always. Effort is set on every logged set, so
+            // putting it behind a tap costs one on every set to save a
+            // little height once.
+            _scale(),
+            const SizedBox(height: 12),
+            _rpeScale(),
+            const SizedBox(height: 18),
             Row(
               children: [
                 Expanded(
@@ -337,182 +452,377 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
     );
   }
 
-  /// A rotating counter for the reps field. It and the text field are two
-  /// views of the same number: spinning writes into the field, typing moves
-  /// the wheel. Neither is the primary — spinning is faster for small
-  /// adjustments, typing is better for anything unusual.
-  Widget _wheelPicker() {
+  /// The upper scale: whichever of weight or count was last tapped.
+  ///
+  /// Weight moves in quarters up to fifty and in larger steps above it;
+  /// counts move in ones. Seven are in view and the rest are a drag away.
+  Widget _scale() {
+    final unit = _unit[_focusedRow] ?? widget.unit;
+
+    if (_field == _Field.weight) {
+        final max = unit == 'lb' ? 600.0 : 300.0;
+        // Quarters up to fifty, where a plate or a stack can actually change
+        // by that much, then two and a half beyond it. Keeping quarters the
+        // whole way would put nine hundred steps between fifty and three
+        // hundred, none of which any bar can be loaded to.
+        final values = [
+          for (var v = 0.25; v <= 50; v += 0.25) v,
+          for (var v = 52.5; v <= max; v += 2.5) v,
+        ];
+        final current =
+            double.tryParse(_weight[_focusedRow]?.text.trim() ?? '');
+        final start = current != null
+            ? values.indexWhere((v) => v >= current)
+            : values.indexWhere((v) => v >= 1);
+
+        return _scaleBlock(
+          'WEIGHT  ${unit.toUpperCase()}',
+          _PillScale(
+            // A key per scale, or Flutter reuses the state of whichever was
+            // here before and the new scale inherits its scroll position:
+            // two thousand pixels into the weights lands nowhere sensible
+            // among sixty repetitions.
+            key: const ValueKey('scale-weight'),
+            values: values,
+            value: current,
+            format: num2,
+            startAt: start < 0 ? 0 : start,
+            onChanged: (v) {
+              _weight[_focusedRow]?.text = num2(v);
+              setState(() {});
+            },
+          ),
+        );
+    }
+
     final label = switch (widget.setType) {
       SetType.time => 'SECONDS',
       SetType.distance => 'STEPS',
       _ => 'REPS',
     };
-    final side = widget.rows.length > 1
-        ? '  ${widget.rows.firstWhere((r) => r['id'] == _focusedRow, orElse: () => widget.rows.first)['side']}'
-        : '';
+    final step = widget.setType == SetType.reps ? 1 : 5;
+    final vmax = widget.setType == SetType.reps ? 60 : 600;
+    final values = [for (var v = step; v <= vmax; v += step) v.toDouble()];
+    final current = double.tryParse(_value[_focusedRow]?.text.trim() ?? '');
+    final opening = switch (widget.setType) {
+      SetType.time => 30.0,
+      SetType.distance => 20.0,
+      _ => 8.0,
+    };
+    final start = values.indexWhere((v) => v >= (current ?? opening));
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('$label$side', style: BvType.label),
-        const SizedBox(height: 4),
-        SizedBox(
-          height: 116,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              // band marking the selected row
-              Container(
-                height: 38,
-                decoration: BoxDecoration(
-                  color: Bv.sage200,
-                  borderRadius: BorderRadius.circular(Bv.rMd),
-                ),
-              ),
-              ListWheelScrollView.useDelegate(
-                controller: _wheel,
-                itemExtent: 38,
-                perspective: 0.004,
-                diameterRatio: 1.7,
-                physics: const FixedExtentScrollPhysics(),
-                onSelectedItemChanged: (i) {
-                  HapticFeedback.selectionClick();
-                  _fromWheel = true;
-                  _value[_focusedRow]?.text = '${_items[i]}';
-                  _fromWheel = false;
-                  setState(() {});
-                },
-                childDelegate: ListWheelChildBuilderDelegate(
-                  childCount: _items.length,
-                  builder: (context, i) => Center(
-                    child: Text('${_items[i]}', style: BvType.metric),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
+    return _scaleBlock(
+      label,
+      _PillScale(
+        key: const ValueKey('scale-value'),
+        values: values,
+        value: current,
+        format: (v) => '${v.round()}',
+        startAt: start < 0 ? 0 : start,
+        onChanged: (v) {
+          _value[_focusedRow]?.text = '${v.round()}';
+          setState(() {});
+        },
+      ),
     );
   }
 
-  /// Effort rating for whichever side is focused, matching how the rotating
-  /// counter behaves. Two full chip rows would push the Log button off screen.
-  Widget _rpeBlock() {
-    final multi = widget.rows.length > 1;
-    final side = multi
+  /// The lower scale, always effort. Shown whatever else is being changed,
+  /// since it is set on every logged set.
+  Widget _rpeScale() {
+    final current = _rpe[_focusedRow];
+    return _scaleBlock(
+      'RPE',
+      _PillScale(
+        key: const ValueKey('scale-rpe'),
+        values: rpeChoices,
+        value: current,
+        format: num2,
+        startAt: _rpeStart,
+        onChanged: (v) => setState(() => _rpe[_focusedRow] = v),
+      ),
+      onClear: current == null
+          ? null
+          : () => setState(() => _rpe[_focusedRow] = null),
+    );
+  }
+
+  Widget _scaleBlock(String label, Widget scale, {VoidCallback? onClear}) {
+    final side = widget.rows.length > 1
         ? '  ${widget.rows.firstWhere((r) => r['id'] == _focusedRow, orElse: () => widget.rows.first)['side']}'
         : '';
-    final current = _rpe[_focusedRow];
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Text('RPE$side', style: BvType.label),
+            Text('$label$side', style: BvType.label),
             const Spacer(),
-            if (current != null)
-              TextButton(
-                onPressed: () => setState(() => _rpe[_focusedRow] = null),
-                child: const Text('clear'),
-              ),
+            if (onClear != null)
+              TextButton(onPressed: onClear, child: const Text('clear')),
           ],
         ),
         const SizedBox(height: 4),
-        Wrap(
-          spacing: 6,
-          runSpacing: 4,
-          children: rpeChoices
-              .map((v) => ChoiceChip(
-                    label: Text(num2(v)),
-                    selected: current == v,
-                    onSelected: (_) => setState(() => _rpe[_focusedRow] = v),
-                  ))
-              .toList(),
-        ),
+        scale,
       ],
     );
   }
 
-  Widget _sideBlock(Map<String, dynamic> r) {
-    final id = r['id'] as int;
-    final side = r['side'] as String;
-    final focused = _focusedRow == id;
-    final rpe = _rpe[id];
+  /// The set as a small table: a column for each number, a row for each
+  /// side.
+  ///
+  /// Each label is written once at the top rather than on every cell, and
+  /// the sides are named by a letter at the start of their row. A unilateral
+  /// set was otherwise repeating the word Weight, the word Reps, the word
+  /// RPE and the unit twice over for two numbers and a rating.
+  Widget _setTable() {
+    final multi = widget.rows.length > 1;
+    const sideCol = 22.0;
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (side != 'both')
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Row(
-                children: [
-                  Text(
-                    side == 'R' ? 'Right' : 'Left',
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: focused ? Bv.forest800 : Bv.ink600,
-                          fontWeight:
-                              focused ? FontWeight.w600 : FontWeight.w400,
-                        ),
-                  ),
-                  const Spacer(),
-                  // Both sides' ratings stay visible, so the chips below only
-                  // need to change one at a time.
-                  Text(rpe == null ? 'RPE —' : 'RPE ${num2(rpe)}',
-                      style: BvType.label),
-                ],
-              ),
-            ),
-          Row(
+    Widget header() => Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Row(
             children: [
+              if (multi) const SizedBox(width: sideCol),
               Expanded(
-                child: TextField(
-                  controller: _weight[id],
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                flex: 4,
+                child: Row(
+                  children: [
+                    Text('WEIGHT', style: BvType.label),
+                    const SizedBox(width: 6),
+                    _unitButton(),
                   ],
-                  decoration: InputDecoration(
-                    labelText: 'Weight',
-                    // Tappable, because which machine you used is a property
-                    // of this set rather than of the exercise.
-                    suffix: InkWell(
-                      onTap: () => setState(() {
-                        _unit[id] = (_unit[id] ?? widget.unit) == 'kg'
-                            ? 'lb'
-                            : 'kg';
-                        _focusRow(id);
-                      }),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: Text(
-                          (_unit[id] ?? widget.unit).toUpperCase(),
-                          style: BvType.label.copyWith(color: Bv.forest700),
-                        ),
-                      ),
-                    ),
-                  ),
-                  onTap: () => _focusRow(id),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
-                child: TextField(
-                  controller: _value[id],
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: InputDecoration(labelText: _valueLabel),
-                  onTap: () => _focusRow(id),
-                ),
+                flex: 3,
+                child: Text(_valueLabel.toUpperCase(), style: BvType.label),
               ),
+              const SizedBox(width: 10),
+              Expanded(flex: 2, child: Text('RPE', style: BvType.label)),
             ],
           ),
-        ],
+        );
+
+    Widget row(Map<String, dynamic> r) {
+      final id = r['id'] as int;
+      final side = r['side'] as String;
+      final rpe = _rpe[id];
+
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Row(
+          children: [
+            if (multi)
+              SizedBox(
+                width: sideCol,
+                child: Text(
+                  side == 'R' ? 'R' : 'L',
+                  style: BvType.label.copyWith(
+                    color: _focusedRow == id ? Bv.forest800 : Bv.ink600,
+                  ),
+                ),
+              ),
+            Expanded(
+              flex: 4,
+              child: _cell(
+                id: id,
+                controller: _weight[id]!,
+                field: _Field.weight,
+                decimal: true,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              flex: 3,
+              child: _cell(
+                id: id,
+                controller: _value[id]!,
+                field: _Field.value,
+                decimal: false,
+                digits: 3,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              flex: 2,
+              child: _rpeCell(id, rpe),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        header(),
+        ...widget.rows.map(row),
+      ],
+    );
+  }
+
+  /// Which machine this set was done on. In the header because both sides of
+  /// one set are done on the same one.
+  Widget _unitButton() {
+    final unit = _unit[_focusedRow] ?? widget.unit;
+    return Material(
+      color: Bv.sage200,
+      borderRadius: BorderRadius.circular(Bv.rSm),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(Bv.rSm),
+        onTap: () => setState(() {
+          final next = unit == 'kg' ? 'lb' : 'kg';
+          for (final r in widget.rows) {
+            _unit[r['id'] as int] = next;
+          }
+          _field = _Field.weight;
+        }),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(unit.toUpperCase(),
+                  style: BvType.label.copyWith(color: Bv.forest800)),
+              const Icon(Icons.swap_horiz, size: 13, color: Bv.forest600),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// One number. Tapping it brings up its scale; tapping it again, when its
+  /// scale is already showing, opens the keyboard for figures the scale does
+  /// not carry.
+  ///
+  /// The cell is the scale's own sand with a narrow cream panel for the
+  /// figure itself, sized to four characters. The sand is the part that
+  /// reaches the scale, the cream the part that reaches the keyboard, and
+  /// which column it belongs to is said once at the top.
+  Widget _cell({
+    required int id,
+    required TextEditingController controller,
+    required _Field field,
+    required bool decimal,
+    int digits = 4,
+  }) {
+    final key = '$id-$field';
+    final chosen = _focusedRow == id && _field == field;
+    final typing = _typing == key;
+    // A digit in this face is roughly six tenths of its size.
+    final size = BvType.metric.fontSize ?? 20;
+    final panel = digits * size * 0.62 + 16;
+
+    void choose({bool keyboard = false}) {
+      if (!keyboard) FocusManager.instance.primaryFocus?.unfocus();
+      setState(() {
+        _focusedRow = id;
+        _field = field;
+        _typing = null;
+      });
+    }
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: choose,
+      child: Container(
+        padding: const EdgeInsets.all(5),
+        decoration: BoxDecoration(
+          color: Bv.sand400,
+          borderRadius: BorderRadius.circular(Bv.rMd),
+          border: Border.all(
+            color: chosen ? Bv.forest600 : Colors.transparent,
+            width: 1.8,
+          ),
+        ),
+        child: Center(
+          child: Container(
+            width: panel,
+            decoration: BoxDecoration(
+              color: Bv.cream100,
+              borderRadius: BorderRadius.circular(Bv.rSm),
+            ),
+            child: TextField(
+              controller: controller,
+              focusNode: _nodeFor(key),
+              readOnly: !typing,
+              showCursor: typing,
+              textAlign: TextAlign.center,
+              keyboardType: decimal
+                  ? const TextInputType.numberWithOptions(decimal: true)
+                  : TextInputType.number,
+              inputFormatters: [
+                decimal
+                    ? FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))
+                    : FilteringTextInputFormatter.digitsOnly,
+              ],
+              style: BvType.metric,
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(vertical: 8),
+              ),
+              onTap: () {
+                if (typing) return;
+                if (chosen) {
+                  setState(() => _typing = key);
+                  WidgetsBinding.instance.addPostFrameCallback(
+                      (_) => _nodeFor(key).requestFocus());
+                } else {
+                  choose(keyboard: true);
+                }
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _rpeCell(int id, double? rpe) {
+    final size = BvType.metric.fontSize ?? 20;
+    final panel = 3 * size * 0.62 + 16;
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        FocusManager.instance.primaryFocus?.unfocus();
+        setState(() {
+          _focusedRow = id;
+          _typing = null;
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.all(5),
+        decoration: BoxDecoration(
+          color: Bv.sand400,
+          borderRadius: BorderRadius.circular(Bv.rMd),
+          // No outline, ever. Its scale is always on screen, so there is
+          // nothing to say about which cell is driving it; which side is
+          // being rated is said by the letter at the start of the row.
+          border: Border.all(color: Colors.transparent, width: 1.8),
+        ),
+        child: Center(
+          child: Container(
+            width: panel,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: Bv.cream100,
+              borderRadius: BorderRadius.circular(Bv.rSm),
+            ),
+            child: Center(
+              child: Text(
+                rpe == null ? '\u2014' : num2(rpe),
+                style: rpe == null
+                    ? BvType.metric.copyWith(color: Bv.sand500)
+                    : BvType.metric,
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

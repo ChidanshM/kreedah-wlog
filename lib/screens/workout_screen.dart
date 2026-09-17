@@ -198,6 +198,11 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
       unit: vm.unit,
       setNumber: setNumber,
       rows: vm.setsBySetNumber[setNumber]!,
+      // Frozen onto the session when it started, so the scale shows the
+      // effort that was prescribed then rather than whatever the routine
+      // says now.
+      targetRpeMin: (vm.row['target_rpe_min'] as num?)?.toDouble(),
+      targetRpeMax: (vm.row['target_rpe_max'] as num?)?.toDouble(),
     );
     if (saved == true) await _load();
   }

@@ -172,7 +172,14 @@ class SetType {
 /// entry rather than one per distance, since the distance lives on each set.
 const trackExerciseKey = 'CUSTOM/TRACK_INTERVAL';
 
-const rpeChoices = [6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0];
+/// Effort ratings, in half steps.
+///
+/// Runs below six because a routine can prescribe an easy warm-up set, and a
+/// prescription that cannot be selected is worse than one that is not
+/// offered. Only a window of this is shown at once; see the set editor.
+const rpeChoices = [
+  4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0
+];
 
 /// Renders a prescribed target as one line, or null when nothing is set.
 ///

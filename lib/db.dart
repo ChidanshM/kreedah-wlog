@@ -1376,15 +1376,17 @@ class Db {
         final vol = (setType == SetType.reps && kg != null && reps != null)
             ? kg * reps
             : 0.0;
-        // The unit belongs to the set rather than the exercise, so a set
-        // pre-filled from history keeps the unit it was actually performed
-        // in. Taking the exercise's undid that a week later: a cable stack
-        // marked 32.5 kg came back labelled 32.5 lb, the load right and the
-        // label wrong, which is the same error one layer up from the one
-        // the per-set unit was introduced to fix.
-        final entryUnit = (src?['entry_unit'] as String?) ?? unit;
-        final entered = (src?['weight_entered'] as num?)?.toDouble() ??
-            (kg == null ? null : fromKg(kg, entryUnit));
+        // The exercise's unit decides how a session starts, not the unit of
+        // whatever was done last. Carrying the old set's unit forward meant
+        // an exercise configured in kilograms opened in pounds because that
+        // is what the machine said a fortnight ago, and changing the
+        // exercise's unit appeared to do nothing.
+        //
+        // The unit still belongs to the set: it is kept when a set is added
+        // during a session, and whatever is typed is stored. It simply does
+        // not reach across from one session to the next.
+        final entryUnit = unit;
+        final entered = kg == null ? null : fromKg(kg, entryUnit);
 
         batch.insert('sets', {
           'we_id': weId,
