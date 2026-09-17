@@ -66,8 +66,8 @@ class SetEditorSheet extends StatefulWidget {
   State<SetEditorSheet> createState() => _SetEditorSheetState();
 }
 
-/// Which of the two numbers the upper scale is editing. Effort has a scale
-/// of its own and is not one of these.
+/// Which number a cell holds. Only used to key focus nodes apart, since
+/// each number now has one place it is set from.
 enum _Field { weight, value }
 
 /// A row of values with a pill on the selected one.
@@ -190,6 +190,138 @@ class _PillScaleState extends State<_PillScale> {
   }
 }
 
+/// A narrow vertical wheel of counts, standing beside the table.
+///
+/// One for the whole table rather than one per row: it changes whichever row
+/// is focused, so a two sided set nudges the right side then the left
+/// without two controls competing for the same strip of screen.
+class _RepsWheel extends StatefulWidget {
+  const _RepsWheel({
+    super.key,
+    required this.values,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final List<int> values;
+  final int? value;
+  final ValueChanged<int> onChanged;
+
+  @override
+  State<_RepsWheel> createState() => _RepsWheelState();
+}
+
+class _RepsWheelState extends State<_RepsWheel> {
+  static const _itemExtent = 32.0;
+  late FixedExtentScrollController _c;
+
+  /// The wheel reports a selection while it is first laying itself out, and
+  /// again whenever it is moved to follow a number changed elsewhere.
+  /// Neither is the user choosing anything, and passing either on would
+  /// rebuild the sheet in the middle of building it.
+  bool _ready = false;
+  bool _programmatic = false;
+
+  int _indexOf(int? v) {
+    if (v == null) return widget.values.indexOf(8).clamp(0, widget.values.length - 1);
+    var best = 0, bestD = 1 << 30;
+    for (var i = 0; i < widget.values.length; i++) {
+      final d = (widget.values[i] - v).abs();
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _c = FixedExtentScrollController(initialItem: _indexOf(widget.value));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _ready = true;
+    });
+  }
+
+  @override
+  void didUpdateWidget(_RepsWheel old) {
+    super.didUpdateWidget(old);
+    // Follows the number when it is changed elsewhere — by the big scale, by
+    // typing, or by the focus moving to the other side.
+    if (!_c.hasClients) return;
+    final want = _indexOf(widget.value);
+    if (_c.selectedItem == want) return;
+    _programmatic = true;
+    _c.jumpToItem(want);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _programmatic = false;
+    });
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = _indexOf(widget.value);
+    return Container(
+      width: 46,
+      // Three values, and a fixed height: a wheel with no bound on it grows
+      // to whatever it is given, which here was the whole sheet.
+      height: _itemExtent * 3,
+      decoration: BoxDecoration(
+        color: Bv.sand400,
+        borderRadius: BorderRadius.circular(Bv.rMd),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Container(
+            height: _itemExtent,
+            margin: const EdgeInsets.symmetric(horizontal: 4),
+            decoration: BoxDecoration(
+              // The same marker the horizontal scales use, so all three read
+              // as one kind of control turned different ways.
+              color: Bv.sage200,
+              borderRadius: BorderRadius.circular(Bv.rSm),
+              border: Border.all(color: Bv.forest600, width: 1.5),
+            ),
+          ),
+          ListWheelScrollView.useDelegate(
+            controller: _c,
+            itemExtent: _itemExtent,
+            perspective: 0.004,
+            diameterRatio: 1.4,
+            physics: const FixedExtentScrollPhysics(),
+            onSelectedItemChanged: (i) {
+              if (!_ready || _programmatic) return;
+              if (widget.values[i] == widget.value) return;
+              HapticFeedback.selectionClick();
+              widget.onChanged(widget.values[i]);
+            },
+            childDelegate: ListWheelChildBuilderDelegate(
+              childCount: widget.values.length,
+              builder: (context, i) => Center(
+                child: Text(
+                  '${widget.values[i]}',
+                  style: i == selected
+                      ? BvType.metric.copyWith(color: Bv.forest800)
+                      : BvType.bodySm.copyWith(color: Bv.ink600),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _SetEditorSheetState extends State<SetEditorSheet> {
   final _weight = <int, TextEditingController>{};
   final _value = <int, TextEditingController>{};
@@ -217,10 +349,14 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
 
   int _focusedRow = 0;
 
-  /// Which of the three the scale beneath is driving. Tapping any of them
-  /// moves it, so there is one scale rather than three, and it is always
-  /// the one for the number being changed.
-  _Field _field = _Field.weight;
+  // Kept for the moment, not deleted: until the wheel proves itself, the
+  // arrangement where one scale served both weight and count may be worth
+  // returning to. Restoring it means uncommenting this, the branch in
+  // _scale below, and the two assignments in _cell and the unit button.
+  //
+  // /// Which of the two the upper scale is driving. Tapping either moves
+  // /// it, so there is one scale rather than two.
+  // _Field _field = _Field.weight;
 
   /// Equipment weights exactly as recorded, each with its own unit. Never
   /// converted: a converted chip enters a converted number, which is how
@@ -452,79 +588,79 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
     );
   }
 
-  /// The upper scale: whichever of weight or count was last tapped.
+  /// The upper scale, always weight.
   ///
-  /// Weight moves in quarters up to fifty and in larger steps above it;
-  /// counts move in ones. Seven are in view and the rest are a drag away.
+  /// Counts have the wheel beside the table and effort has the row below, so
+  /// nothing switches: each number has one place it is set from.
+  ///
+  /// The version where this scale switched between weight and count is kept
+  /// below rather than removed, since whether the wheel is better than a
+  /// second scale is the thing being tried.
   Widget _scale() {
     final unit = _unit[_focusedRow] ?? widget.unit;
-
-    if (_field == _Field.weight) {
-        final max = unit == 'lb' ? 600.0 : 300.0;
-        // Quarters up to fifty, where a plate or a stack can actually change
-        // by that much, then two and a half beyond it. Keeping quarters the
-        // whole way would put nine hundred steps between fifty and three
-        // hundred, none of which any bar can be loaded to.
-        final values = [
-          for (var v = 0.25; v <= 50; v += 0.25) v,
-          for (var v = 52.5; v <= max; v += 2.5) v,
-        ];
-        final current =
-            double.tryParse(_weight[_focusedRow]?.text.trim() ?? '');
-        final start = current != null
-            ? values.indexWhere((v) => v >= current)
-            : values.indexWhere((v) => v >= 1);
-
-        return _scaleBlock(
-          'WEIGHT  ${unit.toUpperCase()}',
-          _PillScale(
-            // A key per scale, or Flutter reuses the state of whichever was
-            // here before and the new scale inherits its scroll position:
-            // two thousand pixels into the weights lands nowhere sensible
-            // among sixty repetitions.
-            key: const ValueKey('scale-weight'),
-            values: values,
-            value: current,
-            format: num2,
-            startAt: start < 0 ? 0 : start,
-            onChanged: (v) {
-              _weight[_focusedRow]?.text = num2(v);
-              setState(() {});
-            },
-          ),
-        );
-    }
-
-    final label = switch (widget.setType) {
-      SetType.time => 'SECONDS',
-      SetType.distance => 'STEPS',
-      _ => 'REPS',
-    };
-    final step = widget.setType == SetType.reps ? 1 : 5;
-    final vmax = widget.setType == SetType.reps ? 60 : 600;
-    final values = [for (var v = step; v <= vmax; v += step) v.toDouble()];
-    final current = double.tryParse(_value[_focusedRow]?.text.trim() ?? '');
-    final opening = switch (widget.setType) {
-      SetType.time => 30.0,
-      SetType.distance => 20.0,
-      _ => 8.0,
-    };
-    final start = values.indexWhere((v) => v >= (current ?? opening));
+    final max = unit == 'lb' ? 600.0 : 300.0;
+    // Quarters up to fifty, where a plate or a stack can actually change by
+    // that much, then two and a half beyond it. Keeping quarters the whole
+    // way would put nine hundred steps between fifty and three hundred,
+    // none of which any bar can be loaded to.
+    final values = [
+      for (var v = 0.25; v <= 50; v += 0.25) v,
+      for (var v = 52.5; v <= max; v += 2.5) v,
+    ];
+    final current = double.tryParse(_weight[_focusedRow]?.text.trim() ?? '');
+    final start = current != null
+        ? values.indexWhere((v) => v >= current)
+        : values.indexWhere((v) => v >= 1);
 
     return _scaleBlock(
-      label,
+      'WEIGHT  ${unit.toUpperCase()}',
       _PillScale(
-        key: const ValueKey('scale-value'),
+        key: const ValueKey('scale-weight'),
         values: values,
         value: current,
-        format: (v) => '${v.round()}',
+        format: num2,
         startAt: start < 0 ? 0 : start,
         onChanged: (v) {
-          _value[_focusedRow]?.text = '${v.round()}';
+          _weight[_focusedRow]?.text = num2(v);
           setState(() {});
         },
       ),
     );
+
+    // The count branch, from when this scale switched. Put back by guarding
+    // the block above with `if (_field == _Field.weight)` and restoring
+    // this after it.
+    //
+    // final label = switch (widget.setType) {
+    //   SetType.time => 'SECONDS',
+    //   SetType.distance => 'STEPS',
+    //   _ => 'REPS',
+    // };
+    // final step = widget.setType == SetType.reps ? 1 : 5;
+    // final vmax = widget.setType == SetType.reps ? 60 : 600;
+    // final values = [for (var v = step; v <= vmax; v += step) v.toDouble()];
+    // final current = double.tryParse(_value[_focusedRow]?.text.trim() ?? '');
+    // final opening = switch (widget.setType) {
+    //   SetType.time => 30.0,
+    //   SetType.distance => 20.0,
+    //   _ => 8.0,
+    // };
+    // final start = values.indexWhere((v) => v >= (current ?? opening));
+    //
+    // return _scaleBlock(
+    //   label,
+    //   _PillScale(
+    //     key: const ValueKey('scale-value'),
+    //     values: values,
+    //     value: current,
+    //     format: (v) => '${v.round()}',
+    //     startAt: start < 0 ? 0 : start,
+    //     onChanged: (v) {
+    //       _value[_focusedRow]?.text = '${v.round()}';
+    //       setState(() {});
+    //     },
+    //   ),
+    // );
   }
 
   /// The lower scale, always effort. Shown whatever else is being changed,
@@ -578,9 +714,13 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
   Widget _setTable() {
     final multi = widget.rows.length > 1;
     const sideCol = 22.0;
+    // Room beside the table for the wheel, plus the gap before it.
+    const wheelCol = 46.0;
+    const wheelGap = 10.0;
 
     Widget header() => Padding(
-          padding: const EdgeInsets.only(bottom: 6),
+          padding: const EdgeInsets.only(
+              bottom: 6, right: wheelCol + wheelGap),
           child: Row(
             children: [
               if (multi) const SizedBox(width: sideCol),
@@ -596,7 +736,7 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
               ),
               const SizedBox(width: 10),
               Expanded(
-                flex: 3,
+                flex: 2,
                 child: Text(_valueLabel.toUpperCase(), style: BvType.label),
               ),
               const SizedBox(width: 10),
@@ -635,13 +775,13 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
             ),
             const SizedBox(width: 10),
             Expanded(
-              flex: 3,
+              flex: 2,
               child: _cell(
                 id: id,
                 controller: _value[id]!,
                 field: _Field.value,
                 decimal: false,
-                digits: 3,
+                digits: 2,
               ),
             ),
             const SizedBox(width: 10),
@@ -654,11 +794,43 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
       );
     }
 
+    // The wheel stands alongside the rows rather than inside one, so it is
+    // the same height as the table however many sides the exercise has.
+    final step = widget.setType == SetType.reps ? 1 : 5;
+    final vmax = widget.setType == SetType.reps ? 60 : 600;
+    final wheelValues = [for (var v = step; v <= vmax; v += step) v];
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         header(),
-        ...widget.rows.map(row),
+        Row(
+          // Centred against the rows rather than pinned to the top, so it
+          // sits level with one row and between two.
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: widget.rows.map(row).toList(),
+              ),
+            ),
+            const SizedBox(width: wheelGap),
+            Padding(
+              // The rows carry a gap beneath each of them, so without this
+              // the wheel centres against the gap as well as the cells.
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _RepsWheel(
+                values: wheelValues,
+                value: int.tryParse(_value[_focusedRow]?.text.trim() ?? ''),
+                onChanged: (v) {
+                  _value[_focusedRow]?.text = '$v';
+                  setState(() {});
+                },
+              ),
+            ),
+          ],
+        ),
       ],
     );
   }
@@ -677,7 +849,7 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
           for (final r in widget.rows) {
             _unit[r['id'] as int] = next;
           }
-          _field = _Field.weight;
+          // _field = _Field.weight;
         }),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
@@ -710,7 +882,9 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
     int digits = 4,
   }) {
     final key = '$id-$field';
-    final chosen = _focusedRow == id && _field == field;
+    // While the scale switched, this read `_focusedRow == id && _field ==
+    // field`, so the outline followed whichever number the scale was on.
+    final chosen = _focusedRow == id && field == _Field.weight;
     final typing = _typing == key;
     // A digit in this face is roughly six tenths of its size.
     final size = BvType.metric.fontSize ?? 20;
@@ -720,7 +894,7 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
       if (!keyboard) FocusManager.instance.primaryFocus?.unfocus();
       setState(() {
         _focusedRow = id;
-        _field = field;
+        // _field = field;
         _typing = null;
       });
     }
