@@ -70,6 +70,21 @@ class SetEditorSheet extends StatefulWidget {
 /// each number now has one place it is set from.
 enum _Field { weight, value }
 
+/// The marker on each of the three controls.
+///
+/// One colour each, so a glance says which number a control sets without
+/// reading its heading. Effort borrows the lavender the session screen
+/// already prints ratings in.
+class _Marker {
+  const _Marker(this.fill, this.edge);
+  final Color fill;
+  final Color edge;
+
+  static const weight = _Marker(Color(0xFFD3E2F2), Color(0xFF4A7CB0));
+  static const count = _Marker(Color(0xFFF5E3C3), Color(0xFFB98430));
+  static const effort = _Marker(Color(0xFFE3DEF4), Bv.lavender600);
+}
+
 /// A row of values with a pill on the selected one.
 ///
 /// Seven are in view at a time; the rest are a drag away. Tapping a value
@@ -83,6 +98,7 @@ class _PillScale extends StatefulWidget {
     required this.onChanged,
     required this.format,
     required this.startAt,
+    required this.marker,
   });
 
   /// How many are in view. Seven is as many as stay readable at the size
@@ -93,6 +109,7 @@ class _PillScale extends StatefulWidget {
   final double? value;
   final ValueChanged<double> onChanged;
   final String Function(double) format;
+  final _Marker marker;
 
   /// Which value the row opens on, when nothing is chosen yet.
   final int startAt;
@@ -166,17 +183,17 @@ class _PillScaleState extends State<_PillScale> {
                       horizontal: 2, vertical: 5),
                   decoration: on
                       ? BoxDecoration(
-                          color: Bv.sage200,
+                          color: widget.marker.fill,
                           borderRadius: BorderRadius.circular(Bv.rMd),
-                          border:
-                              Border.all(color: Bv.forest600, width: 1.5),
+                          border: Border.all(
+                              color: widget.marker.edge, width: 1.5),
                         )
                       : null,
                   child: Center(
                     child: Text(
                       widget.format(widget.values[i]),
                       style: on
-                          ? BvType.metric.copyWith(color: Bv.forest800)
+                          ? BvType.metric.copyWith(color: Bv.ink900)
                           : BvType.metric.copyWith(color: Bv.ink600),
                     ),
                   ),
@@ -197,15 +214,16 @@ class _PillScaleState extends State<_PillScale> {
 /// without two controls competing for the same strip of screen.
 class _RepsWheel extends StatefulWidget {
   const _RepsWheel({
-    super.key,
     required this.values,
     required this.value,
     required this.onChanged,
+    required this.marker,
   });
 
   final List<int> values;
   final int? value;
   final ValueChanged<int> onChanged;
+  final _Marker marker;
 
   @override
   State<_RepsWheel> createState() => _RepsWheelState();
@@ -285,11 +303,9 @@ class _RepsWheelState extends State<_RepsWheel> {
             height: _itemExtent,
             margin: const EdgeInsets.symmetric(horizontal: 4),
             decoration: BoxDecoration(
-              // The same marker the horizontal scales use, so all three read
-              // as one kind of control turned different ways.
-              color: Bv.sage200,
+              color: widget.marker.fill,
               borderRadius: BorderRadius.circular(Bv.rSm),
-              border: Border.all(color: Bv.forest600, width: 1.5),
+              border: Border.all(color: widget.marker.edge, width: 1.5),
             ),
           ),
           ListWheelScrollView.useDelegate(
@@ -310,7 +326,7 @@ class _RepsWheelState extends State<_RepsWheel> {
                 child: Text(
                   '${widget.values[i]}',
                   style: i == selected
-                      ? BvType.metric.copyWith(color: Bv.forest800)
+                      ? BvType.metric.copyWith(color: Bv.ink900)
                       : BvType.bodySm.copyWith(color: Bv.ink600),
                 ),
               ),
@@ -620,6 +636,7 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
         value: current,
         format: num2,
         startAt: start < 0 ? 0 : start,
+        marker: _Marker.weight,
         onChanged: (v) {
           _weight[_focusedRow]?.text = num2(v);
           setState(() {});
@@ -675,6 +692,7 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
         value: current,
         format: num2,
         startAt: _rpeStart,
+        marker: _Marker.effort,
         onChanged: (v) => setState(() => _rpe[_focusedRow] = v),
       ),
       onClear: current == null
@@ -714,33 +732,39 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
   Widget _setTable() {
     final multi = widget.rows.length > 1;
     const sideCol = 22.0;
-    // Room beside the table for the wheel, plus the gap before it.
-    const wheelCol = 46.0;
-    const wheelGap = 10.0;
+    const gap = 10.0;
+    // Fixed rather than shares of the row. Three numbers do not need the
+    // full width, and setting them outright is the only way to narrow all
+    // three at once: proportions can only move space between them.
+    const weightCol = 92.0;
+    const valueCol = 68.0;
+    const rpeCol = 68.0;
 
     Widget header() => Padding(
-          padding: const EdgeInsets.only(
-              bottom: 6, right: wheelCol + wheelGap),
+          padding: const EdgeInsets.only(bottom: 6),
           child: Row(
             children: [
               if (multi) const SizedBox(width: sideCol),
-              Expanded(
-                flex: 4,
+              SizedBox(
+                width: weightCol,
                 child: Row(
                   children: [
                     Text('WEIGHT', style: BvType.label),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 4),
                     _unitButton(),
                   ],
                 ),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                flex: 2,
+              const SizedBox(width: gap),
+              SizedBox(
+                width: valueCol,
                 child: Text(_valueLabel.toUpperCase(), style: BvType.label),
               ),
-              const SizedBox(width: 10),
-              Expanded(flex: 2, child: Text('RPE', style: BvType.label)),
+              const SizedBox(width: gap),
+              SizedBox(
+                width: rpeCol,
+                child: Text('RPE', style: BvType.label),
+              ),
             ],
           ),
         );
@@ -764,29 +788,31 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
                   ),
                 ),
               ),
-            Expanded(
-              flex: 4,
+            SizedBox(
+              width: weightCol,
               child: _cell(
                 id: id,
                 controller: _weight[id]!,
                 field: _Field.weight,
                 decimal: true,
+                marker: _Marker.weight,
               ),
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              flex: 2,
+            const SizedBox(width: gap),
+            SizedBox(
+              width: valueCol,
               child: _cell(
                 id: id,
                 controller: _value[id]!,
                 field: _Field.value,
                 decimal: false,
                 digits: 2,
+                marker: _Marker.count,
               ),
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              flex: 2,
+            const SizedBox(width: gap),
+            SizedBox(
+              width: rpeCol,
               child: _rpeCell(id, rpe),
             ),
           ],
@@ -805,17 +831,15 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
       children: [
         header(),
         Row(
-          // Centred against the rows rather than pinned to the top, so it
-          // sits level with one row and between two.
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: widget.rows.map(row).toList(),
-              ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: widget.rows.map(row).toList(),
             ),
-            const SizedBox(width: wheelGap),
+            // Pushes the wheel to the far edge rather than letting it follow
+            // the table: it stays put while the columns are narrowed.
+            const Spacer(),
             Padding(
               // The rows carry a gap beneath each of them, so without this
               // the wheel centres against the gap as well as the cells.
@@ -823,6 +847,7 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
               child: _RepsWheel(
                 values: wheelValues,
                 value: int.tryParse(_value[_focusedRow]?.text.trim() ?? ''),
+                marker: _Marker.count,
                 onChanged: (v) {
                   _value[_focusedRow]?.text = '$v';
                   setState(() {});
@@ -870,15 +895,14 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
   /// scale is already showing, opens the keyboard for figures the scale does
   /// not carry.
   ///
-  /// The cell is the scale's own sand with a narrow cream panel for the
-  /// figure itself, sized to four characters. The sand is the part that
-  /// reaches the scale, the cream the part that reaches the keyboard, and
-  /// which column it belongs to is said once at the top.
+  /// The figure sits on the same colour as the marker of the control that
+  /// sets it, so a number and the thing that changes it are visibly a pair.
   Widget _cell({
     required int id,
     required TextEditingController controller,
     required _Field field,
     required bool decimal,
+    required _Marker marker,
     int digits = 4,
   }) {
     final key = '$id-$field';
@@ -913,12 +937,8 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
           ),
         ),
         child: Center(
-          child: Container(
+          child: SizedBox(
             width: panel,
-            decoration: BoxDecoration(
-              color: Bv.cream100,
-              borderRadius: BorderRadius.circular(Bv.rSm),
-            ),
             child: TextField(
               controller: controller,
               focusNode: _nodeFor(key),
@@ -934,10 +954,20 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
                     : FilteringTextInputFormatter.digitsOnly,
               ],
               style: BvType.metric,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 border: InputBorder.none,
+                filled: true,
+                fillColor: marker.fill,
                 isDense: true,
-                contentPadding: EdgeInsets.symmetric(vertical: 8),
+                contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(Bv.rSm),
+                  borderSide: BorderSide.none,
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(Bv.rSm),
+                  borderSide: BorderSide.none,
+                ),
               ),
               onTap: () {
                 if (typing) return;
@@ -958,7 +988,9 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
 
   Widget _rpeCell(int id, double? rpe) {
     final size = BvType.metric.fontSize ?? 20;
-    final panel = 3 * size * 0.62 + 16;
+    // The same two characters the count uses, so the two narrow columns
+    // match rather than one being slightly wider for no reason.
+    final panel = 2 * size * 0.62 + 16;
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -984,7 +1016,7 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
             width: panel,
             padding: const EdgeInsets.symmetric(vertical: 8),
             decoration: BoxDecoration(
-              color: Bv.cream100,
+              color: _Marker.effort.fill,
               borderRadius: BorderRadius.circular(Bv.rSm),
             ),
             child: Center(
