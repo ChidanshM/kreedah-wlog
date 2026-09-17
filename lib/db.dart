@@ -251,6 +251,12 @@ class Db {
 
         // done = 0 means "planned, pre-filled, not yet confirmed".
         // Planned sets are discarded when the session is finished.
+        //
+        // Every column added by a migration has to appear here too. rest_sec
+        // was added at v5 by altering the table and never added to this
+        // statement, so upgrading worked and installing fresh produced a
+        // table without it: seeding a session then failed on the first
+        // insert, and with it every screen that waited on the result.
         await d.execute('''
           CREATE TABLE sets(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -266,6 +272,7 @@ class Db {
             rpe REAL,
             volume_kg REAL NOT NULL DEFAULT 0,
             distance_m REAL,
+            rest_sec INTEGER,
             done INTEGER NOT NULL DEFAULT 0,
             ts TEXT
           )''');

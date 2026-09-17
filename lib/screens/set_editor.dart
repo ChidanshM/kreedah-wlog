@@ -259,26 +259,7 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
                 style: theme.textTheme.bodySmall, maxLines: 1),
             const SizedBox(height: 16),
             ...widget.rows.map(_sideBlock),
-            if (_chipWeights.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text('YOUR WEIGHTS', style: BvType.label),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 6,
-                runSpacing: 4,
-                children: _chipWeights
-                    .map((e) => ActionChip(
-                          label: Text('${num2(e.weight)} ${e.unit}'),
-                          onPressed: () {
-                            // Takes the unit with it, so what is stored is
-                            // what the machine says.
-                            _weight[_focusedRow]?.text = num2(e.weight);
-                            setState(() => _unit[_focusedRow] = e.unit);
-                          },
-                        ))
-                    .toList(),
-              ),
-            ],
+            _weightChips(),
             const SizedBox(height: 16),
             _wheelPicker(),
             const SizedBox(height: 16),
@@ -306,6 +287,53 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
           ],
         ),
       ),
+    );
+  }
+
+  /// The weights you own, in the unit this set is being entered in.
+  ///
+  /// Only that unit is offered, so the row reads as a rack rather than as a
+  /// conversion table, and every chip already carries the figure printed on
+  /// the thing you are about to pick up. The unit beside the field switches
+  /// which rack is shown, which is how the two cable stacks are reached.
+  Widget _weightChips() {
+    final unit = _unit[_focusedRow] ?? widget.unit;
+    final mine = _chipWeights.where((e) => e.unit == unit).toList();
+    final other = _chipWeights.where((e) => e.unit != unit).length;
+
+    if (mine.isEmpty && other == 0) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 4),
+        Text('WEIGHT', style: BvType.label),
+        const SizedBox(height: 6),
+        if (mine.isEmpty)
+          // Everything owned is recorded in the other unit. Said plainly,
+          // rather than showing converted figures that match nothing on any
+          // machine.
+          Text(
+            'Nothing recorded in $unit. '
+            'Tap ${unit == 'kg' ? 'LB' : 'KG'} beside the weight to see the '
+            'other $other.',
+            style: BvType.bodySm,
+          )
+        else
+          Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            children: mine
+                .map((e) => ActionChip(
+                      label: Text(num2(e.weight)),
+                      onPressed: () {
+                        _weight[_focusedRow]?.text = num2(e.weight);
+                        setState(() {});
+                      },
+                    ))
+                .toList(),
+          ),
+      ],
     );
   }
 
