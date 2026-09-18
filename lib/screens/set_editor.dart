@@ -163,11 +163,49 @@ class _PillScaleState extends State<_PillScale> {
   final _scroll = ScrollController();
   bool _placed = false;
 
+  /// The last value this scale itself reported, and the width it was last
+  /// laid out at.
+  ///
+  /// A number set anywhere else — a quick-pick weight, the keyboard, the
+  /// focus moving to the other side — has to bring the scale with it, or the
+  /// marker sits off screen and the scale looks broken. Its own taps are
+  /// excluded, since it is already there.
+  double? _self;
+  double _viewport = 0;
+
   int? get _index {
     final v = widget.value;
     if (v == null) return null;
     final i = widget.values.indexOf(v);
     return i == -1 ? null : i;
+  }
+
+  double _offsetOf(int i) {
+    final selected = _index;
+    final before = i * widget.restWidth;
+    final grown = (selected != null && selected < i)
+        ? widget.selectedWidth - widget.restWidth
+        : 0.0;
+    return before + grown;
+  }
+
+  /// Centre a value in the viewport.
+  double _centre(int i, {required bool selected}) {
+    final w = selected ? widget.selectedWidth : widget.restWidth;
+    return _offsetOf(i) + w / 2 - _viewport / 2;
+  }
+
+  @override
+  void didUpdateWidget(_PillScale old) {
+    super.didUpdateWidget(old);
+    if (widget.value == old.value) return;
+    if (widget.value == _self) return;
+    final i = _index;
+    if (i == null || !_scroll.hasClients || _viewport == 0) return;
+    final target = _centre(i, selected: true)
+        .clamp(0.0, _scroll.position.maxScrollExtent);
+    _scroll.animateTo(target,
+        duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
   }
 
   @override
@@ -180,26 +218,17 @@ class _PillScaleState extends State<_PillScale> {
   Widget build(BuildContext context) {
     final selected = _index;
 
-    /// Where a value starts, given everything before it is the narrow width
-    /// except the chosen one.
-    double offsetOf(int i) {
-      final before = i * widget.restWidth;
-      final grown = (selected != null && selected < i)
-          ? widget.selectedWidth - widget.restWidth
-          : 0.0;
-      return before + grown;
-    }
-
     return LayoutBuilder(
       builder: (context, box) {
+        _viewport = box.maxWidth;
+
         // Opened with the chosen value in the middle. Done once, so
         // scrolling away and tapping does not snap back.
         if (!_placed) {
           _placed = true;
           final want = selected ?? widget.startAt;
-          final w = selected == want ? widget.selectedWidth : widget.restWidth;
           final offset =
-              (offsetOf(want) + w / 2 - box.maxWidth / 2).clamp(0.0, 1e9);
+              _centre(want, selected: selected == want).clamp(0.0, 1e9);
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (_scroll.hasClients) {
               _scroll.jumpTo(
@@ -238,6 +267,7 @@ class _PillScaleState extends State<_PillScale> {
                       behavior: HitTestBehavior.opaque,
                       onTap: () {
                         HapticFeedback.selectionClick();
+                        _self = widget.values[i];
                         widget.onChanged(widget.values[i]);
                       },
                       child: SizedBox(
@@ -698,29 +728,51 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
             // One line rather than two. The card behind already names the
             // exercise, so this only has to say which set of it, and two
             // lines of heading cost height the scales want.
-            Text.rich(
-              TextSpan(
-                children: [
-                  TextSpan(
-                    text: 'Set ${widget.setNumber}',
-                    style: theme.textTheme.titleMedium,
+            Row(
+              children: [
+                Expanded(
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: 'Set ${widget.setNumber}',
+                          style: theme.textTheme.titleLarge,
+                        ),
+                        TextSpan(
+                          text: '  :  ',
+                          style: theme.textTheme.titleLarge
+                              ?.copyWith(color: Bv.sand500),
+                        ),
+                        TextSpan(
+                          text: widget.exerciseName,
+                          style: theme.textTheme.titleMedium
+                              ?.copyWith(color: Bv.ink600),
+                        ),
+                      ],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  TextSpan(
-                    text: '  :  ',
-                    style: theme.textTheme.titleMedium
-                        ?.copyWith(color: Bv.sand500),
+                ),
+                // Up here rather than in the table header: one arm or two is
+                // a fact about the whole set, not about a column of it, and
+                // the corner is where something that changes the shape of
+                // what is below belongs.
+                if (widget.weId != null)
+                  IconButton(
+                    tooltip: _rows.length > 1
+                        ? 'Combine the sides'
+                        : 'Split the sides',
+                    icon: Icon(
+                      _rows.length > 1 ? Icons.compress : Icons.expand,
+                      size: 26,
+                      color: Bv.forest700,
+                    ),
+                    onPressed: _toggleSides,
                   ),
-                  TextSpan(
-                    text: widget.exerciseName,
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(color: Bv.ink600),
-                  ),
-                ],
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+              ],
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 10),
             _setTable(),
             _weightChips(),
             const SizedBox(height: 14),
@@ -762,6 +814,10 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
   /// conversion table, and every chip already carries the figure printed on
   /// the thing you are about to pick up. The unit beside the field switches
   /// which rack is shown, which is how the two cable stacks are reached.
+  ///
+  /// Four at a time, nearest what is already in the field. A full rack ran
+  /// to three rows and became the loudest thing on the sheet for a list you
+  /// rarely read past the first few of; the rest open in a grid.
   Widget _weightChips() {
     final unit = _unit[_focusedRow] ?? widget.unit;
     final mine = _chipWeights.where((e) => e.unit == unit).toList();
@@ -769,38 +825,128 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
 
     if (mine.isEmpty && other == 0) return const SizedBox.shrink();
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: 4),
-        Text('WEIGHT', style: BvType.label),
-        const SizedBox(height: 6),
-        if (mine.isEmpty)
+    // Nearest the current figure rather than the lightest four, so the ones
+    // offered are those either side of what is already being lifted.
+    final current = double.tryParse(_weight[_focusedRow]?.text.trim() ?? '');
+    final shown = mine.toList();
+    if (current != null && shown.length > 4) {
+      shown.sort((a, b) =>
+          (a.weight - current).abs().compareTo((b.weight - current).abs()));
+    }
+    final first = shown.take(4).toList()
+      ..sort((a, b) => a.weight.compareTo(b.weight));
+
+    return Padding(
+      // Indented to the weight column, since that is the only thing these
+      // fill in. Starting at the sheet's edge left them adrift of the table
+      // above.
+      padding: const EdgeInsets.only(left: 22, top: 8),
+      child: mine.isEmpty
           // Everything owned is recorded in the other unit. Said plainly,
           // rather than showing converted figures that match nothing on any
           // machine.
-          Text(
-            'Nothing recorded in $unit. '
-            'Tap ${unit == 'kg' ? 'LB' : 'KG'} beside the weight to see the '
-            'other $other.',
-            style: BvType.bodySm,
-          )
-        else
-          Wrap(
-            spacing: 6,
-            runSpacing: 4,
-            children: mine
-                .map((e) => ActionChip(
-                      label: Text(num2(e.weight)),
-                      onPressed: () {
-                        _weight[_focusedRow]?.text = num2(e.weight);
-                        setState(() {});
-                      },
-                    ))
-                .toList(),
-          ),
-      ],
+          ? Text(
+              'Nothing recorded in $unit. '
+              'Tap ${unit == 'kg' ? 'LB' : 'KG'} beside the weight to see the '
+              'other $other.',
+              style: BvType.bodySm,
+            )
+          : Row(
+              children: [
+                for (final e in first) ...[
+                  _weightChip(e.weight),
+                  const SizedBox(width: 6),
+                ],
+                if (mine.length > 4)
+                  // Everything else, in order, rather than a row that wraps.
+                  SizedBox(
+                    height: 32,
+                    width: 36,
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        minimumSize: Size.zero,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      onPressed: () => _allWeights(mine),
+                      child: const Icon(Icons.add, size: 16),
+                    ),
+                  ),
+              ],
+            ),
     );
+  }
+
+  /// One quick-pick weight.
+  ///
+  /// All the same width whatever the figure, so four of them read as a row
+  /// of buttons rather than as four differently sized blobs.
+  Widget _weightChip(double w) => SizedBox(
+        height: 32,
+        width: 56,
+        child: OutlinedButton(
+          style: OutlinedButton.styleFrom(
+            padding: EdgeInsets.zero,
+            minimumSize: Size.zero,
+            visualDensity: VisualDensity.compact,
+            textStyle: BvType.metric.copyWith(fontSize: _Fib.s13),
+          ),
+          onPressed: () {
+            _weight[_focusedRow]?.text = num2(w);
+            setState(() {});
+          },
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(num2(w)),
+          ),
+        ),
+      );
+
+  /// Every weight of this kind, lightest first, four to a row.
+  Future<void> _allWeights(List<({double weight, String unit})> all) async {
+    final sorted = all.toList()
+      ..sort((a, b) => a.weight.compareTo(b.weight));
+
+    final picked = await showModalBottomSheet<double>(
+      context: context,
+      builder: (c) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('EVERY WEIGHT  ${sorted.first.unit.toUpperCase()}',
+                  style: BvType.label),
+              const SizedBox(height: 10),
+              GridView.count(
+                crossAxisCount: 4,
+                shrinkWrap: true,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+                childAspectRatio: 2.1,
+                physics: const NeverScrollableScrollPhysics(),
+                children: [
+                  for (final e in sorted)
+                    OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        textStyle: BvType.metric.copyWith(fontSize: _Fib.s13),
+                      ),
+                      onPressed: () => Navigator.pop(c, e.weight),
+                      child: Text(num2(e.weight)),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (picked == null || !mounted) return;
+    _weight[_focusedRow]?.text = num2(picked);
+    setState(() {});
   }
 
   /// The upper scale, always weight.
@@ -997,7 +1143,11 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
           padding: const EdgeInsets.only(bottom: 2),
           child: Row(
             children: [
-              if (multi) const SizedBox(width: sideCol),
+              // Always reserved, even with one row and no letter to put in
+              // it. Adding the column only when there were two sides moved
+              // the whole table sideways on splitting, which read as the
+              // layout jumping rather than as a row appearing.
+              const SizedBox(width: sideCol),
               SizedBox(
                 width: weightCol,
                 child: Row(
@@ -1033,22 +1183,6 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
                 child: Text('RPE',
                     style: headStyle, textAlign: TextAlign.center),
               ),
-              if (widget.weId != null) ...[
-                const Spacer(),
-                // One arm or two belongs to the set that was performed, not
-                // to the plan: the same movement gets done together one week
-                // and a side at a time the next.
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  tooltip: multi ? 'Combine the sides' : 'Split the sides',
-                  icon: Icon(
-                    multi ? Icons.compress : Icons.expand,
-                    size: 18,
-                    color: Bv.forest700,
-                  ),
-                  onPressed: _toggleSides,
-                ),
-              ],
             ],
           ),
         );
@@ -1062,16 +1196,17 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
         padding: const EdgeInsets.only(bottom: 8),
         child: Row(
           children: [
-            if (multi)
-              SizedBox(
-                width: sideCol,
-                child: Text(
-                  side == 'R' ? 'R' : 'L',
-                  style: BvType.label.copyWith(
-                    color: _focusedRow == id ? Bv.forest800 : Bv.ink600,
-                  ),
-                ),
-              ),
+            SizedBox(
+              width: sideCol,
+              child: multi
+                  ? Text(
+                      side == 'R' ? 'R' : 'L',
+                      style: BvType.label.copyWith(
+                        color: _focusedRow == id ? Bv.forest800 : Bv.ink600,
+                      ),
+                    )
+                  : null,
+            ),
             SizedBox(
               width: weightCol,
               child: _cell(
@@ -1128,6 +1263,15 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
             // Pushes the wheel to the far edge rather than letting it follow
             // the table: it stays put while the columns are narrowed.
             const Spacer(),
+            // A rule between them, so the wheel reads as a control standing
+            // beside the table rather than as a fourth column of it. In the
+            // track's own sand it was invisible against the cells.
+            Container(
+              width: 1.5,
+              height: _Fib.s34 * 3,
+              margin: const EdgeInsets.symmetric(horizontal: 14),
+              color: Bv.sand500,
+            ),
             _RepsWheel(
               values: wheelValues,
               value: int.tryParse(_value[_focusedRow]?.text.trim() ?? ''),
