@@ -20,6 +20,7 @@ Future<bool?> editSet({
   required List<Map<String, dynamic>> rows,
   double? targetRpeMin,
   double? targetRpeMax,
+  int? weId,
 }) {
   return showModalBottomSheet<bool>(
     context: context,
@@ -33,6 +34,7 @@ Future<bool?> editSet({
       rows: rows,
       targetRpeMin: targetRpeMin,
       targetRpeMax: targetRpeMax,
+      weId: weId,
     ),
   );
 }
@@ -48,6 +50,7 @@ class SetEditorSheet extends StatefulWidget {
     required this.rows,
     this.targetRpeMin,
     this.targetRpeMax,
+    this.weId,
   });
 
   final String exerciseName;
@@ -62,6 +65,10 @@ class SetEditorSheet extends StatefulWidget {
   final double? targetRpeMin;
   final double? targetRpeMax;
 
+  /// The exercise this set belongs to, needed to split it into two sides or
+  /// put them back together. Absent where that is not offered.
+  final int? weId;
+
   @override
   State<SetEditorSheet> createState() => _SetEditorSheetState();
 }
@@ -69,6 +76,20 @@ class SetEditorSheet extends StatefulWidget {
 /// Which number a cell holds. Only used to key focus nodes apart, since
 /// each number now has one place it is set from.
 enum _Field { weight, value }
+
+/// Sizes drawn from the Fibonacci sequence, which is the golden ratio in
+/// whole numbers: each is about 1.618 times the one before, and none of them
+/// needs rounding.
+///
+/// Using a sequence rather than picking numbers means the relationships hold
+/// when one of them changes, and there is somewhere to go next instead of
+/// inventing 23 because 21 felt small.
+class _Fib {
+  static const s13 = 13.0;
+  static const s21 = 21.0;
+  static const s34 = 34.0;
+  static const s55 = 55.0;
+}
 
 /// The marker on each of the three controls.
 ///
@@ -99,17 +120,37 @@ class _PillScale extends StatefulWidget {
     required this.format,
     required this.startAt,
     required this.marker,
+    required this.selectedSize,
+    required this.restSize,
+    required this.restWidth,
+    required this.selectedWidth,
+    this.restItalic = false,
   });
 
-  /// How many are in view. Seven is as many as stay readable at the size
-  /// the numbers are set in, and the same for every scale so they line up.
-  static const visible = 7;
+  /// How wide each value sits.
+  ///
+  /// Two widths rather than one: the chosen value needs room for five
+  /// characters at the larger size, while the ones either side of it hold a
+  /// smaller number and only look sparse when given the same. The scale
+  /// works out where to scroll from these rather than from a single step.
+  final double restWidth;
+  final double selectedWidth;
 
   final List<double> values;
   final double? value;
   final ValueChanged<double> onChanged;
   final String Function(double) format;
   final _Marker marker;
+
+  /// Sizes per scale rather than one for all: the effort scale carries two
+  /// characters and the weight scale up to five, so they do not sit well at
+  /// the same size.
+  final double selectedSize;
+  final double restSize;
+
+  /// Slants the values either side of the marker. Useful where the sizes
+  /// are close together and the slant is what separates chosen from not.
+  final bool restItalic;
 
   /// Which value the row opens on, when nothing is chosen yet.
   final int startAt;
@@ -139,17 +180,26 @@ class _PillScaleState extends State<_PillScale> {
   Widget build(BuildContext context) {
     final selected = _index;
 
+    /// Where a value starts, given everything before it is the narrow width
+    /// except the chosen one.
+    double offsetOf(int i) {
+      final before = i * widget.restWidth;
+      final grown = (selected != null && selected < i)
+          ? widget.selectedWidth - widget.restWidth
+          : 0.0;
+      return before + grown;
+    }
+
     return LayoutBuilder(
       builder: (context, box) {
-        final step = box.maxWidth / _PillScale.visible;
-
-        // Opened on whatever was chosen, or on what the routine asked for.
-        // Done once, so scrolling away and tapping does not snap back.
+        // Opened with the chosen value in the middle. Done once, so
+        // scrolling away and tapping does not snap back.
         if (!_placed) {
           _placed = true;
           final want = selected ?? widget.startAt;
-          final offset = ((want - _PillScale.visible ~/ 2) * step)
-              .clamp(0.0, double.infinity);
+          final w = selected == want ? widget.selectedWidth : widget.restWidth;
+          final offset =
+              (offsetOf(want) + w / 2 - box.maxWidth / 2).clamp(0.0, 1e9);
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (_scroll.hasClients) {
               _scroll.jumpTo(
@@ -158,48 +208,89 @@ class _PillScaleState extends State<_PillScale> {
           });
         }
 
-        return Container(
-          height: 52,
-          decoration: BoxDecoration(
-            color: Bv.sand400,
-            borderRadius: BorderRadius.circular(Bv.rMd),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: ListView.builder(
-            controller: _scroll,
-            scrollDirection: Axis.horizontal,
-            itemExtent: step,
-            itemCount: widget.values.length,
-            itemBuilder: (context, i) {
-              final on = i == selected;
-              return GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  widget.onChanged(widget.values[i]);
-                },
-                child: Container(
-                  margin: const EdgeInsets.symmetric(
-                      horizontal: 2, vertical: 5),
-                  decoration: on
-                      ? BoxDecoration(
-                          color: widget.marker.fill,
-                          borderRadius: BorderRadius.circular(Bv.rMd),
-                          border: Border.all(
-                              color: widget.marker.edge, width: 1.5),
-                        )
-                      : null,
-                  child: Center(
-                    child: Text(
-                      widget.format(widget.values[i]),
-                      style: on
-                          ? BvType.metric.copyWith(color: Bv.ink900)
-                          : BvType.metric.copyWith(color: Bv.ink600),
-                    ),
-                  ),
+        return SizedBox(
+          // Tall enough for the chosen pill, which stands above the track
+          // rather than sitting inside it.
+          height: _Fib.s55,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // The track is only as tall as the smaller numbers need: 21
+              // around a 13 point figure, which is the next step down and
+              // leaves no more room than the line itself takes. At 34 there
+              // was a band of sand above and below the text doing nothing.
+              Container(
+                height: _Fib.s21,
+                decoration: BoxDecoration(
+                  color: Bv.sand400,
+                  borderRadius: BorderRadius.circular(Bv.rMd),
                 ),
-              );
-            },
+              ),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(Bv.rMd),
+                child: ListView.builder(
+                  controller: _scroll,
+                  scrollDirection: Axis.horizontal,
+                  itemCount: widget.values.length,
+                  itemBuilder: (context, i) {
+                    final on = i == selected;
+                    return GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        widget.onChanged(widget.values[i]);
+                      },
+                      child: SizedBox(
+                        width: on ? widget.selectedWidth : widget.restWidth,
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(
+                              horizontal: 2, vertical: 4),
+                          decoration: on
+                              ? BoxDecoration(
+                                  color: widget.marker.fill,
+                                  borderRadius:
+                                      BorderRadius.circular(Bv.rMd),
+                                  border: Border.all(
+                                      color: widget.marker.edge, width: 1.5),
+                                )
+                              : null,
+                          child: Center(
+                            child: Padding(
+                              // Close in on the number rather than leaving
+                              // it floating in a wide pill.
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 2),
+                              child: FittedBox(
+                                // Lets the pill be sized to the usual value
+                                // while an unusually long one shrinks to fit
+                                // rather than being cut off.
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  widget.format(widget.values[i]),
+                                  style: on
+                                      ? BvType.metric.copyWith(
+                                          fontSize: widget.selectedSize,
+                                          fontWeight: FontWeight.w700,
+                                          color: Bv.ink900,
+                                        )
+                                      : BvType.metric.copyWith(
+                                          fontSize: widget.restSize,
+                                          color: Bv.ink600,
+                                          fontStyle: widget.restItalic
+                                              ? FontStyle.italic
+                                              : FontStyle.normal,
+                                        ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
         );
       },
@@ -230,7 +321,7 @@ class _RepsWheel extends StatefulWidget {
 }
 
 class _RepsWheelState extends State<_RepsWheel> {
-  static const _itemExtent = 32.0;
+  static const _itemExtent = _Fib.s34;
   late FixedExtentScrollController _c;
 
   /// The wheel reports a selection while it is first laying itself out, and
@@ -286,22 +377,27 @@ class _RepsWheelState extends State<_RepsWheel> {
   @override
   Widget build(BuildContext context) {
     final selected = _indexOf(widget.value);
-    return Container(
-      width: 46,
+    return SizedBox(
+      // Wide enough for the marker, which stands out either side of the
+      // track rather than sitting inside it.
+      width: _Fib.s34,
       // Three values, and a fixed height: a wheel with no bound on it grows
       // to whatever it is given, which here was the whole sheet.
       height: _itemExtent * 3,
-      decoration: BoxDecoration(
-        color: Bv.sand400,
-        borderRadius: BorderRadius.circular(Bv.rMd),
-      ),
-      clipBehavior: Clip.antiAlias,
       child: Stack(
         alignment: Alignment.center,
         children: [
+          // The track is only as wide as the smaller numbers need, the same
+          // as the horizontal scales are only as tall.
           Container(
-            height: _itemExtent,
-            margin: const EdgeInsets.symmetric(horizontal: 4),
+            width: _Fib.s21,
+            decoration: BoxDecoration(
+              color: Bv.sand400,
+              borderRadius: BorderRadius.circular(Bv.rMd),
+            ),
+          ),
+          Container(
+            height: _itemExtent - 4,
             decoration: BoxDecoration(
               color: widget.marker.fill,
               borderRadius: BorderRadius.circular(Bv.rSm),
@@ -325,9 +421,19 @@ class _RepsWheelState extends State<_RepsWheel> {
               builder: (context, i) => Center(
                 child: Text(
                   '${widget.values[i]}',
+                  // Set outright rather than taken from the sequence: these
+                  // were chosen for this wheel, and 13 for the unselected
+                  // left them too faint beside a 21 point figure.
                   style: i == selected
-                      ? BvType.metric.copyWith(color: Bv.ink900)
-                      : BvType.bodySm.copyWith(color: Bv.ink600),
+                      ? BvType.metric.copyWith(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                          color: Bv.ink900,
+                        )
+                      : BvType.metric.copyWith(
+                          fontSize: 15,
+                          color: Bv.ink600,
+                        ),
                 ),
               ),
             ),
@@ -374,6 +480,13 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
   // /// it, so there is one scale rather than two.
   // _Field _field = _Field.weight;
 
+  /// The sides of this set, held here rather than read from the widget.
+  ///
+  /// Splitting a set changes how many there are, so the sheet reloads them
+  /// and rebuilds rather than closing: it was closing the session screen
+  /// along with itself.
+  late List<Map<String, dynamic>> _rows;
+
   /// Equipment weights exactly as recorded, each with its own unit. Never
   /// converted: a converted chip enters a converted number, which is how
   /// 32.5 kg became 71.65 lb in the log.
@@ -382,16 +495,24 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
   @override
   void initState() {
     super.initState();
-    for (final r in widget.rows) {
+    _rows = widget.rows;
+    _fillControllers();
+    _focusedRow = _rows.first['id'] as int;
+    _loadChips();
+  }
+
+  /// A controller per side per number, from whatever rows are current.
+  void _fillControllers() {
+    for (final r in _rows) {
       final id = r['id'] as int;
       final w = (r['weight_entered'] as num?)?.toDouble();
-      _weight[id] = TextEditingController(text: w == null ? '' : num2(w));
-      _value[id] = TextEditingController(text: _valueText(r));
+      _weight[id] ??= TextEditingController();
+      _value[id] ??= TextEditingController();
+      _weight[id]!.text = w == null ? '' : num2(w);
+      _value[id]!.text = _valueText(r);
       _rpe[id] = (r['rpe'] as num?)?.toDouble();
       _unit[id] = (r['entry_unit'] as String?) ?? widget.unit;
     }
-    _focusedRow = widget.rows.first['id'] as int;
-    _loadChips();
   }
 
   String _valueText(Map<String, dynamic> r) {
@@ -482,8 +603,62 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
     return six < 0 ? 0 : six;
   }
 
-  Future<void> _save({required bool done}) async {
-    for (final r in widget.rows) {
+  /// Split this set into a right and a left, or put the two back together.
+  ///
+  /// Saves what is on screen first, then reloads the sides in place. The
+  /// sheet stays open: an earlier version closed and reopened it, which took
+  /// the session screen with it.
+  Future<void> _toggleSides() async {
+    final weId = widget.weId;
+    if (weId == null) return;
+    final split = _rows.length > 1;
+
+    if (split) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('Put the sides together?'),
+          content: const Text(
+              'The heavier side is kept and the other is dropped. Where both '
+              'were the same load, the one with more repetitions is kept.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(c, false),
+                child: const Text('Cancel')),
+            FilledButton(
+                onPressed: () => Navigator.pop(c, true),
+                child: const Text('Combine')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+
+    await _save(done: false, close: false);
+    if (split) {
+      await Db.mergeSet(weId, widget.setNumber);
+    } else {
+      await Db.splitSet(weId, widget.setNumber);
+    }
+
+    // Reloaded in place. Closing and reopening was popping the session
+    // screen as well as this sheet.
+    final all = await Db.setsFor(weId);
+    final fresh = all
+        .where((s) => s['set_number'] == widget.setNumber)
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+    if (!mounted || fresh.isEmpty) return;
+    setState(() {
+      _rows = fresh;
+      _fillControllers();
+      _focusedRow = _rows.first['id'] as int;
+      _typing = null;
+    });
+  }
+
+  Future<void> _save({required bool done, bool close = true}) async {
+    for (final r in _rows) {
       final id = r['id'] as int;
       final weightText = _weight[id]!.text.trim();
       final valueText = _value[id]!.text.trim();
@@ -504,7 +679,9 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
         done: done,
       );
     }
-    if (mounted) Navigator.pop(context, true);
+    // Not closed when saving on the way to something else, such as
+    // splitting the set: that pop was taking the sheet with it.
+    if (close && mounted) Navigator.pop(context, true);
   }
 
   @override
@@ -518,10 +695,32 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Set ${widget.setNumber}', style: theme.textTheme.titleLarge),
-            Text(widget.exerciseName,
-                style: theme.textTheme.bodySmall, maxLines: 1),
-            const SizedBox(height: 16),
+            // One line rather than two. The card behind already names the
+            // exercise, so this only has to say which set of it, and two
+            // lines of heading cost height the scales want.
+            Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: 'Set ${widget.setNumber}',
+                    style: theme.textTheme.titleMedium,
+                  ),
+                  TextSpan(
+                    text: '  :  ',
+                    style: theme.textTheme.titleMedium
+                        ?.copyWith(color: Bv.sand500),
+                  ),
+                  TextSpan(
+                    text: widget.exerciseName,
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(color: Bv.ink600),
+                  ),
+                ],
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 14),
             _setTable(),
             _weightChips(),
             const SizedBox(height: 14),
@@ -529,7 +728,7 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
             // putting it behind a tap costs one on every set to save a
             // little height once.
             _scale(),
-            const SizedBox(height: 12),
+            const SizedBox(height: 6),
             _rpeScale(),
             const SizedBox(height: 18),
             Row(
@@ -629,7 +828,10 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
         : values.indexWhere((v) => v >= 1);
 
     return _scaleBlock(
-      'WEIGHT  ${unit.toUpperCase()}',
+      // Two letters rather than six: stacked, WEIGHT would stand half again
+      // as tall as the scale beside it and tower over RPE below. WT is what
+      // is written on a plate chart anyway.
+      'WT',
       _PillScale(
         key: const ValueKey('scale-weight'),
         values: values,
@@ -637,11 +839,20 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
         format: num2,
         startAt: start < 0 ? 0 : start,
         marker: _Marker.weight,
+        selectedSize: _Fib.s21,
+        restSize: _Fib.s13,
+        restItalic: true,
+        // 34 and 55 sit in the ratio. A weight of five characters shrinks
+        // slightly to fit rather than the pill being widened to 89 for the
+        // few weights that need it.
+        restWidth: _Fib.s34,
+        selectedWidth: _Fib.s55,
         onChanged: (v) {
           _weight[_focusedRow]?.text = num2(v);
           setState(() {});
         },
       ),
+      gap: 0,
     );
 
     // The count branch, from when this scale switched. Put back by guarding
@@ -683,42 +894,75 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
   /// The lower scale, always effort. Shown whatever else is being changed,
   /// since it is set on every logged set.
   Widget _rpeScale() {
-    final current = _rpe[_focusedRow];
     return _scaleBlock(
       'RPE',
       _PillScale(
         key: const ValueKey('scale-rpe'),
         values: rpeChoices,
-        value: current,
+        value: _rpe[_focusedRow],
         format: num2,
         startAt: _rpeStart,
         marker: _Marker.effort,
+        selectedSize: _Fib.s21,
+        restSize: _Fib.s13,
+        restItalic: true,
+        // 34 and 55 sit in the ratio, and two characters fit 55 at 21 with
+        // room to spare.
+        restWidth: _Fib.s34,
+        selectedWidth: _Fib.s55,
         onChanged: (v) => setState(() => _rpe[_focusedRow] = v),
       ),
-      onClear: current == null
-          ? null
-          : () => setState(() => _rpe[_focusedRow] = null),
+      gap: 0,
     );
   }
 
-  Widget _scaleBlock(String label, Widget scale, {VoidCallback? onClear}) {
-    final side = widget.rows.length > 1
-        ? '  ${widget.rows.firstWhere((r) => r['id'] == _focusedRow, orElse: () => widget.rows.first)['side']}'
+  /// A scale with its name stacked down the left rather than written above
+  /// it.
+  ///
+  /// One letter per line, not turned on its side: the label is six
+  /// characters at most and stacking it keeps it upright and readable, where
+  /// a rotated word has to be tilted to read and a heading above each scale
+  /// put a line of text between two controls that belong together.
+  Widget _scaleBlock(String label, Widget scale, {double gap = 8}) {
+    final side = _rows.length > 1
+        ? _rows.firstWhere((r) => r['id'] == _focusedRow,
+            orElse: () => _rows.first)['side'] as String
         : '';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text('$label$side', style: BvType.label),
-            const Spacer(),
-            if (onClear != null)
-              TextButton(onPressed: onClear, child: const Text('clear')),
-          ],
-        ),
-        const SizedBox(height: 4),
-        scale,
-      ],
+    final letters = label.split('');
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 14,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final c in letters)
+                  Text(
+                    c,
+                    // Darker than a section label: these name the two
+                    // controls that do most of the work on this sheet, and
+                    // at the usual grey they read as a caption on something
+                    // rather than as the thing's name.
+                    style: BvType.label
+                        .copyWith(height: 1.05, color: Bv.ink900),
+                  ),
+                if (side.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(side,
+                      style: BvType.label
+                          .copyWith(height: 1.05, color: Bv.forest800)),
+                ],
+              ],
+            ),
+          ),
+          SizedBox(width: gap),
+          Expanded(child: scale),
+        ],
+      ),
     );
   }
 
@@ -730,7 +974,7 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
   /// set was otherwise repeating the word Weight, the word Reps, the word
   /// RPE and the unit twice over for two numbers and a rating.
   Widget _setTable() {
-    final multi = widget.rows.length > 1;
+    final multi = _rows.length > 1;
     const sideCol = 22.0;
     const gap = 10.0;
     // Fixed rather than shares of the row. Three numbers do not need the
@@ -740,16 +984,35 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
     const valueCol = 68.0;
     const rpeCol = 68.0;
 
+    // Larger than the labels elsewhere: these name the columns of a table
+    // rather than introducing a section, and at the usual size they were
+    // easy to miss above numbers set this big.
+    final headStyle =
+        BvType.label.copyWith(fontSize: _Fib.s13, height: 1.1);
+
     Widget header() => Padding(
-          padding: const EdgeInsets.only(bottom: 6),
+          // Close above the cells rather than floating clear of them: a
+          // heading that far from its column reads as a separate line of
+          // text rather than as the name of what is beneath it.
+          padding: const EdgeInsets.only(bottom: 2),
           child: Row(
             children: [
               if (multi) const SizedBox(width: sideCol),
               SizedBox(
                 width: weightCol,
                 child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text('WEIGHT', style: BvType.label),
+                    // The same two letters the scale uses. Spelled out, this
+                    // plus the unit button came to more than the column is
+                    // wide, and pushed the other two headings out of line
+                    // with their columns.
+                    Flexible(
+                      child: Text('WT',
+                          style: headStyle,
+                          maxLines: 1,
+                          overflow: TextOverflow.clip),
+                    ),
                     const SizedBox(width: 4),
                     _unitButton(),
                   ],
@@ -758,13 +1021,34 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
               const SizedBox(width: gap),
               SizedBox(
                 width: valueCol,
-                child: Text(_valueLabel.toUpperCase(), style: BvType.label),
+                child: Text(_valueLabel.toUpperCase(),
+                    style: headStyle,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.clip),
               ),
               const SizedBox(width: gap),
               SizedBox(
                 width: rpeCol,
-                child: Text('RPE', style: BvType.label),
+                child: Text('RPE',
+                    style: headStyle, textAlign: TextAlign.center),
               ),
+              if (widget.weId != null) ...[
+                const Spacer(),
+                // One arm or two belongs to the set that was performed, not
+                // to the plan: the same movement gets done together one week
+                // and a side at a time the next.
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  tooltip: multi ? 'Combine the sides' : 'Split the sides',
+                  icon: Icon(
+                    multi ? Icons.compress : Icons.expand,
+                    size: 18,
+                    color: Bv.forest700,
+                  ),
+                  onPressed: _toggleSides,
+                ),
+              ],
             ],
           ),
         );
@@ -831,28 +1115,27 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
       children: [
         header(),
         Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
+          // Aligned to the top, not centred. The wheel is taller than a
+          // single row, so centring pushed the cells down by half the
+          // difference and opened a gap under the headings that looked like
+          // padding but was not.
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: widget.rows.map(row).toList(),
+              children: _rows.map(row).toList(),
             ),
             // Pushes the wheel to the far edge rather than letting it follow
             // the table: it stays put while the columns are narrowed.
             const Spacer(),
-            Padding(
-              // The rows carry a gap beneath each of them, so without this
-              // the wheel centres against the gap as well as the cells.
-              padding: const EdgeInsets.only(bottom: 8),
-              child: _RepsWheel(
-                values: wheelValues,
-                value: int.tryParse(_value[_focusedRow]?.text.trim() ?? ''),
-                marker: _Marker.count,
-                onChanged: (v) {
-                  _value[_focusedRow]?.text = '$v';
-                  setState(() {});
-                },
-              ),
+            _RepsWheel(
+              values: wheelValues,
+              value: int.tryParse(_value[_focusedRow]?.text.trim() ?? ''),
+              marker: _Marker.count,
+              onChanged: (v) {
+                _value[_focusedRow]?.text = '$v';
+                setState(() {});
+              },
             ),
           ],
         ),
@@ -871,7 +1154,7 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
         borderRadius: BorderRadius.circular(Bv.rSm),
         onTap: () => setState(() {
           final next = unit == 'kg' ? 'lb' : 'kg';
-          for (final r in widget.rows) {
+          for (final r in _rows) {
             _unit[r['id'] as int] = next;
           }
           // _field = _Field.weight;

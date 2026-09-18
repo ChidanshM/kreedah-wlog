@@ -1453,6 +1453,60 @@ class Db {
     await batch.commit(noResult: true);
   }
 
+  /// Split one set into a right and a left, or put two back together.
+  ///
+  /// One set, not the exercise: the same movement is sometimes done together
+  /// and sometimes a side at a time, and which it was belongs to the set that
+  /// was actually performed rather than to the plan.
+  ///
+  /// Splitting copies the combined numbers onto both sides, since that is
+  /// what was lifted before anyone started counting the sides separately.
+  static Future<void> splitSet(int weId, int setNumber) async {
+    final rows = await _db.query('sets',
+        where: 'we_id = ? AND set_number = ?', whereArgs: [weId, setNumber]);
+    if (rows.length != 1) return;
+    final row = Map<String, dynamic>.from(rows.first);
+    if (row['side'] != 'both') return;
+
+    await _db.transaction((txn) async {
+      await txn.update('sets', {'side': 'R'},
+          where: 'id = ?', whereArgs: [row['id']]);
+      final copy = Map<String, dynamic>.from(row)
+        ..remove('id')
+        ..['side'] = 'L';
+      await txn.insert('sets', copy);
+    });
+  }
+
+  /// Put a split set back together, keeping the heavier side.
+  ///
+  /// The heavier is the one that says what was lifted; averaging would
+  /// invent a load that was never used, and keeping the lighter would
+  /// understate the set. Where the loads match, the one with more
+  /// repetitions wins.
+  static Future<void> mergeSet(int weId, int setNumber) async {
+    final rows = await _db.query('sets',
+        where: 'we_id = ? AND set_number = ?', whereArgs: [weId, setNumber]);
+    if (rows.length < 2) return;
+
+    final sorted = rows.map((e) => Map<String, dynamic>.from(e)).toList()
+      ..sort((a, b) {
+        final ak = (a['weight_kg'] as num?)?.toDouble() ?? -1;
+        final bk = (b['weight_kg'] as num?)?.toDouble() ?? -1;
+        if (ak != bk) return bk.compareTo(ak);
+        return ((b['reps'] as int?) ?? 0).compareTo((a['reps'] as int?) ?? 0);
+      });
+
+    final keep = sorted.first;
+    await _db.transaction((txn) async {
+      await txn.delete('sets',
+          where: 'we_id = ? AND set_number = ? AND id <> ?',
+          whereArgs: [weId, setNumber, keep['id']]);
+      await txn.update('sets', {'side': 'both'},
+          where: 'id = ?', whereArgs: [keep['id']]);
+    });
+  }
+
   static Future<void> deleteSetNumber(int weId, int setNumber) async {
     await _db.delete('sets',
         where: 'we_id = ? AND set_number = ?', whereArgs: [weId, setNumber]);

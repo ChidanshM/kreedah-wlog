@@ -203,6 +203,8 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
       // says now.
       targetRpeMin: (vm.row['target_rpe_min'] as num?)?.toDouble(),
       targetRpeMax: (vm.row['target_rpe_max'] as num?)?.toDouble(),
+      // Lets the sheet split this set into two sides, or put them back.
+      weId: vm.id,
     );
     if (saved == true) await _load();
   }
