@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../app_events.dart';
 import '../db.dart';
+import '../theme.dart';
 import '../util.dart';
 import 'workout_screen.dart';
 
@@ -188,40 +189,81 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
                         ),
                         ...numbers.map((n) {
                           final g = grouped[n]!;
-                          final vol = g.fold<double>(
-                              0,
-                              (a, s) =>
-                                  a + ((s['volume_kg'] as num?)?.toDouble() ?? 0));
+                          final v = _volume(g);
+                          final setType = e['set_type'] as String;
+                          // One style down the whole row. Two sizes side by
+                          // side sat on different baselines, which is what
+                          // made the figures look like they were bobbing
+                          // above and below each other.
+                          final cell = theme.textTheme.bodySmall;
                           return Padding(
                             padding:
-                                const EdgeInsets.fromLTRB(16, 2, 16, 2),
+                                const EdgeInsets.fromLTRB(16, 3, 16, 3),
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                SizedBox(width: 24, child: Text('$n')),
+                                SizedBox(
+                                    width: 18,
+                                    child: Text('$n', style: cell)),
+                                // A side per line, matching the ratings
+                                // beside them. Run together they wrapped,
+                                // and a wrapped row threw every column out
+                                // of line with the row above.
                                 Expanded(
-                                    child: Text(_describe(
-                                        e['set_type'] as String, g))),
-                                // One rating per side, stacked to line up with
-                                // the sides described alongside them.
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: g.map((s) {
-                                    final rpe =
-                                        (s['rpe'] as num?)?.toDouble();
-                                    return Text(
-                                        rpe == null
-                                            ? ''
-                                            : 'RPE ${num2(rpe)}',
-                                        style: theme.textTheme.labelSmall);
-                                  }).toList(),
-                                ),
-                                if (vol > 0)
-                                  Padding(
-                                    padding: const EdgeInsets.only(left: 10),
-                                    child: Text('${num2(vol)} kg',
-                                        style: theme.textTheme.labelSmall),
+                                  flex: 6,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: g
+                                        .map((s) => Text(
+                                              _one(setType, s,
+                                                  withSide: g.length > 1),
+                                              style: cell,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ))
+                                        .toList(),
                                   ),
+                                ),
+                                Expanded(
+                                  flex: 6,
+                                  child: Text(v.text,
+                                      style: cell,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis),
+                                ),
+                                SizedBox(
+                                  width: 34,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.end,
+                                    children: g.map((s) {
+                                      final rpe =
+                                          (s['rpe'] as num?)?.toDouble();
+                                      return Text(
+                                          rpe == null ? '' : '@${num2(rpe)}',
+                                          style: cell);
+                                    }).toList(),
+                                  ),
+                                ),
+                                // Always reserved, so a set entered in
+                                // kilograms lines up with one entered in
+                                // pounds instead of its rating sliding to
+                                // the edge of the card.
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6),
+                                  child: Text(v.showKg ? '|' : ' ',
+                                      style: cell?.copyWith(
+                                          color: Bv.sand500)),
+                                ),
+                                SizedBox(
+                                  width: 84,
+                                  child: Text(v.kgText,
+                                      style: cell,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis),
+                                ),
                               ],
                             ),
                           );
@@ -246,6 +288,77 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
         Text(value, style: theme.textTheme.titleMedium),
       ],
     );
+  }
+
+  /// What a set moved, in the unit it was entered in and in kilograms.
+  ///
+  /// Kilograms alone were shown whatever was typed, so a set logged in
+  /// pounds reported a figure that matched neither the weight beside it nor
+  /// anything on the machine. The entered unit leads; the canonical
+  /// kilograms follow, and only when the two differ.
+  ({String text, String kgText, bool showKg}) _volume(
+      List<Map<String, dynamic>> rows) {
+    var kg = 0.0;
+    var entered = 0.0;
+    var loadKg = 0.0;
+    // Worked out from the load and the repetitions rather than read from
+    // the stored figure, so what is shown is the multiplication it claims
+    // to be.
+    var kgFromLoad = 0.0;
+    String? unit;
+    var comparable = true;
+
+    for (final s in rows) {
+      kg += (s['volume_kg'] as num?)?.toDouble() ?? 0;
+      final w = (s['weight_entered'] as num?)?.toDouble();
+      final reps = s['reps'] as int?;
+      final u = s['entry_unit'] as String?;
+      if (w == null || reps == null || u == null) {
+        comparable = false;
+        continue;
+      }
+      // Two sides on different machines cannot be added up in either of
+      // their units, only in kilograms.
+      unit ??= u;
+      if (u != unit) comparable = false;
+      entered += w * reps;
+      final lk = (s['weight_kg'] as num?)?.toDouble() ?? 0;
+      loadKg = lk;
+      kgFromLoad += lk * reps;
+    }
+
+    if (kg <= 0) return (text: '', kgText: '', showKg: false);
+    if (!comparable || unit == null || unit == 'kg') {
+      return (text: '${num2(kg)} kg', kgText: '', showKg: false);
+    }
+    return (
+      text: '${num2(entered)} $unit (${num2(kg)} kg)',
+      kgText: '${num2(loadKg)}  ${num2(kgFromLoad)}',
+      showKg: true,
+    );
+  }
+
+  /// One side of a set: the load, its unit, and what was done with it.
+  String _one(String setType, Map<String, dynamic> r,
+      {required bool withSide}) {
+    final w = (r['weight_entered'] as num?)?.toDouble();
+    final parts = <String>[];
+    if (withSide) parts.add(r['side'] as String);
+    if (w != null) parts.add('${num2(w)} ${r['entry_unit']}');
+    switch (setType) {
+      case SetType.time:
+        final v = r['duration_sec'] as int?;
+        if (v != null) parts.add('${v}s');
+        break;
+      case SetType.distance:
+        final v = r['distance_steps'] as int?;
+        if (v != null) parts.add('$v steps');
+        break;
+      default:
+        final v = r['reps'] as int?;
+        if (v != null) parts.add('x $v');
+    }
+    return parts.isEmpty ? '—' : parts.join(' ');
   }
 
   String _describe(String setType, List<Map<String, dynamic>> rows) {
