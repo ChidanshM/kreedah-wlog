@@ -360,29 +360,4 @@ class _WorkoutDetailScreenState extends State<WorkoutDetailScreen> {
     }
     return parts.isEmpty ? '—' : parts.join(' ');
   }
-
-  String _describe(String setType, List<Map<String, dynamic>> rows) {
-    String one(Map<String, dynamic> r) {
-      final w = (r['weight_entered'] as num?)?.toDouble();
-      final parts = <String>[];
-      if (w != null) parts.add('${num2(w)} ${r['entry_unit']}');
-      switch (setType) {
-        case SetType.time:
-          final v = r['duration_sec'] as int?;
-          if (v != null) parts.add('${v}s');
-          break;
-        case SetType.distance:
-          final v = r['distance_steps'] as int?;
-          if (v != null) parts.add('$v steps');
-          break;
-        default:
-          final v = r['reps'] as int?;
-          if (v != null) parts.add('x $v');
-      }
-      return parts.isEmpty ? '—' : parts.join(' ');
-    }
-
-    if (rows.length == 1) return one(rows.first);
-    return rows.map((r) => '${r['side']} ${one(r)}').join('   ');
-  }
 }
