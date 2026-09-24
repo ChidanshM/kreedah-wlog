@@ -450,6 +450,7 @@ class _CustomExerciseSheetState extends State<_CustomExerciseSheet> {
   late final _name =
       TextEditingController(text: widget.existing?.name ?? '');
   late final _muscles = {...?widget.existing?.primary};
+  late final _secondary = {...?widget.existing?.secondary};
   late final _equipment = {...?widget.existing?.equipment};
 
   bool get _editing => widget.existing != null;
@@ -468,12 +469,14 @@ class _CustomExerciseSheetState extends State<_CustomExerciseSheet> {
         widget.existing!.key,
         name: name,
         muscles: _muscles.toList(),
+        secondary: _secondary.toList(),
         equipment: _equipment.toList(),
       );
     } else {
       await Db.addCustomExercise(
         name: name,
         muscles: _muscles.toList(),
+        secondary: _secondary.toList(),
         equipment: _equipment.toList(),
       );
     }
@@ -513,7 +516,15 @@ class _CustomExerciseSheetState extends State<_CustomExerciseSheet> {
                     onChanged: (_) => setState(() {}),
                   ),
                   const SizedBox(height: Bv.s4),
-                  Text('MUSCLES', style: BvType.label),
+                  Text('PRIMARY MUSCLES', style: BvType.label),
+                  const SizedBox(height: Bv.s1),
+                  Text(
+                    'What the exercise is for. Only these count towards the '
+                    'body map: secondary muscles turn up in almost everything, '
+                    'so counting them would leave the same few regions '
+                    'permanently hottest.',
+                    style: BvType.bodySm,
+                  ),
                   const SizedBox(height: Bv.s2),
                   Wrap(
                     spacing: 6,
@@ -522,9 +533,42 @@ class _CustomExerciseSheetState extends State<_CustomExerciseSheet> {
                         .map((code) => FilterChip(
                               label: Text(pretty(code)),
                               selected: _muscles.contains(code),
-                              onSelected: (v) => setState(() => v
-                                  ? _muscles.add(code)
-                                  : _muscles.remove(code)),
+                              onSelected: (v) => setState(() {
+                                if (v) {
+                                  _muscles.add(code);
+                                  // A muscle is one or the other, never both.
+                                  _secondary.remove(code);
+                                } else {
+                                  _muscles.remove(code);
+                                }
+                              }),
+                            ))
+                        .toList(),
+                  ),
+                  const SizedBox(height: Bv.s4),
+                  Text('SECONDARY MUSCLES', style: BvType.label),
+                  const SizedBox(height: Bv.s1),
+                  Text(
+                    'What also works, without being the point. Recorded and '
+                    'searchable, but not counted.',
+                    style: BvType.bodySm,
+                  ),
+                  const SizedBox(height: Bv.s2),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: sortMuscles(ExerciseLibrary.muscleCodes)
+                        .map((code) => FilterChip(
+                              label: Text(pretty(code)),
+                              selected: _secondary.contains(code),
+                              onSelected: (v) => setState(() {
+                                if (v) {
+                                  _secondary.add(code);
+                                  _muscles.remove(code);
+                                } else {
+                                  _secondary.remove(code);
+                                }
+                              }),
                             ))
                         .toList(),
                   ),

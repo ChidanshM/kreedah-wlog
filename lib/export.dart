@@ -59,12 +59,19 @@ class Exporter {
     'distance_steps',
     'rpe',
     'set_volume_kg',
+    'set_volume_lb',
     'set_timestamp',
   ];
 
+  /// One CSV cell.
+  ///
+  /// Numbers are written out in full rather than rounded for reading. A
+  /// spreadsheet is summed and filtered, not glanced at, and two decimals on
+  /// every set is an error that compounds once a year of them is added up.
+  /// Whoever reads it can round; nobody can put back what was dropped.
   static String _cell(Object? v) {
     if (v == null) return '';
-    final s = v is double ? num2(v) : v.toString();
+    final s = v.toString();
     if (s.contains(',') || s.contains('"') || s.contains('\n')) {
       return '"${s.replaceAll('"', '""')}"';
     }
@@ -86,8 +93,10 @@ class Exporter {
       final unit = (r['entry_unit'] ?? 'kg') as String;
       final entered = (r['weight_entered'] as num?)?.toDouble();
 
-      // weight_lb is populated only for rows that were actually entered in lb.
+      // weight_lb is populated only for rows that were actually entered in
+      // lb; weight_kg is canonical and always present. Both unrounded.
       final lb = unit == 'lb' ? entered : null;
+      final volKg = (r['set_volume_kg'] as num?)?.toDouble();
 
       final line = <Object?>[
         r['workout_id'],
@@ -115,7 +124,8 @@ class Exporter {
         r['duration_sec'],
         r['distance_steps'],
         (r['rpe'] as num?)?.toDouble(),
-        (r['set_volume_kg'] as num?)?.toDouble(),
+        volKg,
+        volKg == null ? null : fromKgExact(volKg, 'lb'),
         r['set_timestamp'],
       ];
       buf.writeln(line.map(_cell).join(','));
@@ -275,8 +285,14 @@ class Exporter {
           if (s['distance_m'] != null) 'distance_m': s['distance_m'],
           // Both, always. Kilograms are what the app adds up; pounds keep
           // these files comparable with logs kept before it existed.
+          //
+          // Neither is rounded. Whichever unit the set was entered in is
+          // exact and the other is derived from it, so rounding the derived
+          // one meant converting it back did not return the figure that was
+          // actually lifted. Rounding is for reading, and a file is not
+          // read by eye.
           'volume_kg': volKg,
-          'volume_lb': double.parse(fromKg(volKg, 'lb').toStringAsFixed(2)),
+          'volume_lb': fromKgExact(volKg, 'lb'),
           if (s['rpe'] != null) 'RPE': s['rpe'],
           if (kg != null) 'weight_kg': kg,
           'logged_at': s['ts'],
@@ -318,9 +334,8 @@ class Exporter {
           'Total_Reps': summary['reps'],
           'Total_Sets': summary['sets'],
           'Volume_kg': summary['volume'],
-          'Volume_lb': double.parse(
-              fromKg((summary['volume'] as num).toDouble(), 'lb')
-                  .toStringAsFixed(2)),
+          'Volume_lb': fromKgExact(
+              (summary['volume'] as num).toDouble(), 'lb'),
         },
       },
       'workout_routine': out,

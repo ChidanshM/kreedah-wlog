@@ -30,6 +30,16 @@ double fromKg(double kg, String unit) {
   return double.parse(v.toStringAsFixed(2));
 }
 
+/// The same conversion, unrounded, for anything written to a file.
+///
+/// A figure in the unit a set was entered in is exact; the other unit is
+/// derived from it. Rounding the derived one means converting it back does
+/// not return what was actually lifted — a set of 412.5 kg written out as
+/// 909.41 lb reads back as 412.5014. Small, but it is the difference
+/// between a record and an approximation, and a file is not read by eye.
+double fromKgExact(double kg, String unit) =>
+    unit == 'lb' ? kg * kKgToLb : kg;
+
 /// Convert a displayed weight between units, rounding exactly once.
 ///
 /// Going lb -> kg -> lb round-trips through a value already rounded to two

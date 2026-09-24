@@ -1271,7 +1271,27 @@ class Db {
   /// Change the display unit for an exercise mid-session, converting the
   /// entered values so the numbers on screen keep meaning the same load.
   static Future<void> switchUnit(int weId, String newUnit) async {
-    await updateWorkoutExercise(weId, {'unit': newUnit});
+    final before = await _db.query('workout_exercises',
+        where: 'id = ?', whereArgs: [weId]);
+    final oldExUnit =
+        before.isEmpty ? 'kg' : (before.first['unit'] as String? ?? 'kg');
+
+    // Targets move with the sets. A target is stored in whatever unit the
+    // exercise was in when it was written, so leaving it behind meant a set
+    // prescribed at 32 kg carried on reading "32" under a heading that now
+    // said lb, while the set beneath it had been correctly converted to
+    // 70.55. The set was right; the line above it was lying.
+    final patch = <String, Object?>{'unit': newUnit};
+    if (oldExUnit != newUnit) {
+      for (final f in ['target_weight_min', 'target_weight_max']) {
+        final v = (before.isEmpty ? null : before.first[f]) as num?;
+        if (v != null) {
+          patch[f] = convertWeight(v.toDouble(), oldExUnit, newUnit);
+        }
+      }
+    }
+    await updateWorkoutExercise(weId, patch);
+
     final rows = await _db.query('sets', where: 'we_id = ?', whereArgs: [weId]);
     final batch = _db.batch();
     for (final s in rows) {
@@ -1944,6 +1964,7 @@ class Db {
   static Future<void> addCustomExercise({
     required String name,
     List<String> muscles = const [],
+    List<String> secondary = const [],
     List<String> equipment = const [],
   }) async {
     final key = 'CUSTOM/${name.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]+'), '_')}';
@@ -1955,11 +1976,15 @@ class Db {
         'c': 'CUSTOM',
         'g': '',
         'p': muscles.join(','),
-        's': '',
+        's': secondary.join(','),
         'e': equipment.join(','),
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+    // Which muscles an exercise works is cached, and the body map reads it.
+    // Without this a new exercise contributed nothing to the map until the
+    // app was next started.
+    invalidateMuscleLookup();
   }
 
   /// Change a custom exercise in place.
@@ -1973,16 +1998,23 @@ class Db {
     String key, {
     required String name,
     List<String> muscles = const [],
+    List<String> secondary = const [],
     List<String> equipment = const [],
   }) async {
     await _db.update(
       'custom_exercises',
-      {'n': name, 'p': muscles.join(','), 'e': equipment.join(',')},
+      {
+        'n': name,
+        'p': muscles.join(','),
+        's': secondary.join(','),
+        'e': equipment.join(','),
+      },
       where: 'k = ?',
       whereArgs: [key],
     );
     await _db.update('routine_exercises', {'ex_name': name},
         where: 'ex_key = ?', whereArgs: [key]);
+    invalidateMuscleLookup();
   }
 
   /// Remove a custom exercise from the library.
@@ -1994,6 +2026,7 @@ class Db {
   static Future<void> deleteCustomExercise(String key) async {
     await _db.delete('custom_exercises', where: 'k = ?', whereArgs: [key]);
     await _db.delete('pinned', where: 'ex_key = ?', whereArgs: [key]);
+    invalidateMuscleLookup();
   }
 
   /// How many routines and sessions refer to an exercise, so deleting it can
