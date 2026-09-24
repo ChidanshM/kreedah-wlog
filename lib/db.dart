@@ -1527,6 +1527,51 @@ class Db {
     });
   }
 
+  /// Everything one session is made of, for putting back if an edit is
+  /// abandoned.
+  ///
+  /// A finished session is changed in place as you work — a set deleted, a
+  /// figure corrected — so leaving without saving would otherwise keep every
+  /// change anyway and make the Save button a lie. This is taken when the
+  /// session is opened for editing and restored if it is left without
+  /// saving.
+  ///
+  /// Only the three tables a session occupies. Anything else changed while
+  /// editing is not a session edit and is not rolled back.
+  static Future<Map<String, dynamic>> snapshotWorkout(int id) async {
+    final w = await _db.query('workouts', where: 'id = ?', whereArgs: [id]);
+    final we = await _db
+        .query('workout_exercises', where: 'workout_id = ?', whereArgs: [id]);
+    final ids = we.map((e) => e['id']).toList();
+    final sets = ids.isEmpty
+        ? const <Map<String, Object?>>[]
+        : await _db.query('sets',
+            where: 'we_id IN (${List.filled(ids.length, '?').join(',')})',
+            whereArgs: ids);
+    return {
+      'workouts': w.map((e) => Map<String, dynamic>.from(e)).toList(),
+      'workout_exercises':
+          we.map((e) => Map<String, dynamic>.from(e)).toList(),
+      'sets': sets.map((e) => Map<String, dynamic>.from(e)).toList(),
+    };
+  }
+
+  /// Put a session back as it was when the snapshot was taken.
+  static Future<void> restoreWorkoutSnapshot(
+      int id, Map<String, dynamic> snap) async {
+    await _db.transaction((txn) async {
+      // Cascades clear the exercises and their sets.
+      await txn.delete('workouts', where: 'id = ?', whereArgs: [id]);
+      for (final t in ['workouts', 'workout_exercises', 'sets']) {
+        for (final row in (snap[t] as List? ?? const [])) {
+          await txn.insert(t, Map<String, Object?>.from(row as Map),
+              conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+      }
+    });
+    await refreshMuscleDaysFor(id);
+  }
+
   static Future<void> deleteSetNumber(int weId, int setNumber) async {
     await _db.delete('sets',
         where: 'we_id = ? AND set_number = ?', whereArgs: [weId, setNumber]);

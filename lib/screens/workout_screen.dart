@@ -67,6 +67,15 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
   bool get _editing => _workout?['ended_at'] != null;
   bool get _timeKnown => (_workout?['time_known'] as int? ?? 1) == 1;
 
+  /// How the session looked when it was opened for editing.
+  ///
+  /// Changes land in the database as they are made, so without this leaving
+  /// without saving would keep them anyway and the Save button would be
+  /// saying nothing. Kept only while editing a finished session; a live one
+  /// is being recorded rather than revised.
+  Map<String, dynamic>? _snapshot;
+  bool _dirty = false;
+
   @override
   void initState() {
     super.initState();
@@ -82,6 +91,13 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
 
   Future<void> _load() async {
     final workout = await Db.workout(widget.workoutId);
+    // Taken once, before anything is changed.
+    if (workout?['ended_at'] != null && _snapshot == null) {
+      _snapshot = await Db.snapshotWorkout(widget.workoutId);
+    } else if (workout?['ended_at'] != null) {
+      // Reloads happen for reasons other than an edit, so the flag is set by
+      // the things that actually change something rather than here.
+    }
     final showTimer = await Db.flag('show_timer');
     final rows = await Db.workoutExercises(widget.workoutId);
 
@@ -186,7 +202,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
       final rest = rows.first['rest_sec'] as int?;
       if (rest != null && rest > 0) _startRest(rest);
     }
-    await _load();
+    await _changed();
   }
 
   Future<void> _openEditor(_ExerciseVM vm, int setNumber) async {
@@ -206,7 +222,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
       // Lets the sheet split this set into two sides, or put them back.
       weId: vm.id,
     );
-    if (saved == true) await _load();
+    if (saved == true) await _changed();
   }
 
   /// True once any set of this exercise has been confirmed.
@@ -336,7 +352,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
         await Db.deleteWorkoutExercise(vm.id);
         break;
     }
-    await _load();
+    await _changed();
   }
 
   Future<void> _addExercise() async {
@@ -350,7 +366,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
         routineId: _workout?['routine_id'] as int?,
       );
     }
-    await _load();
+    await _changed();
   }
 
   Future<void> _editTimes() async {
@@ -472,10 +488,83 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     if (mounted) Navigator.pop(context);
   }
 
+  /// Reload after something was changed, so leaving can offer to put it back.
+  Future<void> _changed() async {
+    _dirty = true;
+    await _load();
+  }
+
+  /// Put the session back as it was opened, without leaving the screen.
+  Future<void> _revert() async {
+    if (_snapshot == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Undo every change?'),
+        content: const Text(
+            'The session goes back to how it was when you opened it.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Undo')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await Db.restoreWorkoutSnapshot(widget.workoutId, _snapshot!);
+    _dirty = false;
+    notifyDataChanged();
+    await _load();
+  }
+
   Future<void> _saveEdits() async {
     await Db.saveEdits(widget.workoutId);
+    _snapshot = null;
     notifyDataChanged();
     if (mounted) Navigator.pop(context);
+  }
+
+  /// Leaving an edited session without saving puts it back as it was.
+  ///
+  /// Asked rather than done silently, since abandoning an edit and losing it
+  /// look identical from the outside.
+  Future<bool> _leaveEditing() async {
+    if (!_editing || _snapshot == null || !_dirty) return true;
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Leave without saving?'),
+        content: const Text(
+            'The changes made since this session was opened are undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, 'stay'),
+              child: const Text('Keep editing')),
+          TextButton(
+              onPressed: () => Navigator.pop(c, 'discard'),
+              child: const Text('Discard changes')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, 'save'),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    if (choice == 'save') {
+      await Db.saveEdits(widget.workoutId);
+      _snapshot = null;
+      notifyDataChanged();
+      return true;
+    }
+    if (choice == 'discard') {
+      await Db.restoreWorkoutSnapshot(widget.workoutId, _snapshot!);
+      _snapshot = null;
+      notifyDataChanged();
+      return true;
+    }
+    return false;
   }
 
   @override
@@ -483,7 +572,15 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     final theme = Theme.of(context);
     final started = parseIso(_workout?['started_at'] as String?);
 
-    return Scaffold(
+    return PopScope(
+      // Back is intercepted while editing so the session can be put back if
+      // the changes are not wanted.
+      canPop: !_editing || !_dirty,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        if (await _leaveEditing() && mounted) Navigator.pop(context);
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -509,10 +606,14 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
               if (v == 'discard') _discard();
               if (v == 'note') _sessionNote();
               if (v == 'when') _editTimes();
+              if (v == 'revert') _revert();
             },
             itemBuilder: (c) => [
               const PopupMenuItem(value: 'note', child: Text('Session note')),
               const PopupMenuItem(value: 'when', child: Text('Change date and time')),
+              if (_editing && _dirty)
+                const PopupMenuItem(
+                    value: 'revert', child: Text('Undo every change')),
               PopupMenuItem(
                   value: 'discard',
                   child: Text(_editing ? 'Delete session' : 'Discard session')),
@@ -569,6 +670,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                 ),
               ],
             ),
+      ),
     );
   }
 
@@ -677,7 +779,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                   onPressed: () async {
                     await Db.addSet(vm.id,
                         unilateral: vm.unilateral, unit: vm.unit);
-                    await _load();
+                    await _changed();
                   },
                   icon: const Icon(Icons.add, size: 18),
                   label: const Text('Add set'),
@@ -687,7 +789,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                   TextButton(
                     onPressed: () async {
                       await Db.deleteSetNumber(vm.id, vm.setNumbers.last);
-                      await _load();
+                      await _changed();
                     },
                     child: const Text('Remove set'),
                   ),
@@ -728,13 +830,56 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
 
   /// One set. Confirmed sets recede onto a sage ground; the set you are
   /// about to do sits on white with a real button.
+  ///
+  /// Swipe a row to the right to remove it. The button beneath the card only
+  /// ever removed the last set, so a mistake in the middle meant deleting
+  /// everything after it as well.
   Widget _setRow(_ExerciseVM vm, int setNumber) {
     final rows = vm.setsBySetNumber[setNumber]!;
     final done = rows.every((r) => (r['done'] as int) == 1);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: Bv.s1),
-      child: Material(
+      child: Dismissible(
+        key: ValueKey('set-${vm.id}-$setNumber'),
+        direction: DismissDirection.endToStart,
+        background: Container(
+          decoration: BoxDecoration(
+            color: Bv.error,
+            borderRadius: BorderRadius.circular(Bv.rMd),
+          ),
+          alignment: Alignment.centerRight,
+          padding: const EdgeInsets.only(right: Bv.s4),
+          child: const Icon(Icons.delete_outline, color: Colors.white),
+        ),
+        // Always false: the row is removed by reloading rather than by the
+        // dismissal itself, and letting both happen races a widget out of
+        // the tree while the list is still rebuilding.
+        confirmDismiss: (_) async {
+          final ok = await showDialog<bool>(
+            context: context,
+            builder: (c) => AlertDialog(
+              title: Text('Delete set $setNumber?'),
+              content: const Text(
+                  'Whatever was logged in it goes with it, and the sets after '
+                  'it move up.'),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(c, false),
+                    child: const Text('Keep')),
+                FilledButton(
+                    onPressed: () => Navigator.pop(c, true),
+                    child: const Text('Delete')),
+              ],
+            ),
+          );
+          if (ok == true) {
+            await Db.deleteSetNumber(vm.id, setNumber);
+            await _changed();
+          }
+          return false;
+        },
+        child: Material(
         color: done ? Bv.sage200 : Colors.transparent,
         borderRadius: BorderRadius.circular(Bv.rMd),
         child: InkWell(
@@ -803,6 +948,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
               ],
             ),
           ),
+        ),
         ),
       ),
     );

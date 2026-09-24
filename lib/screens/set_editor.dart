@@ -633,6 +633,37 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
     return six < 0 ? 0 : six;
   }
 
+  /// Remove this set entirely.
+  ///
+  /// The button on the card only ever removed the last one, so a mistake in
+  /// the middle of an exercise meant deleting everything after it too. The
+  /// sets that follow are renumbered, so they stay one to however many
+  /// there are.
+  Future<void> _deleteSet() async {
+    final weId = widget.weId;
+    if (weId == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text('Delete set ${widget.setNumber}?'),
+        content: const Text(
+            'Whatever was logged in it goes with it, and the sets after it '
+            'move up.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Keep')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await Db.deleteSetNumber(weId, widget.setNumber);
+    if (mounted) Navigator.pop(context, true);
+  }
+
   /// Split this set into a right and a left, or put the two back together.
   ///
   /// Saves what is on screen first, then reloads the sides in place. The
@@ -758,7 +789,7 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
                 // a fact about the whole set, not about a column of it, and
                 // the corner is where something that changes the shape of
                 // what is below belongs.
-                if (widget.weId != null)
+                if (widget.weId != null) ...[
                   IconButton(
                     tooltip: _rows.length > 1
                         ? 'Combine the sides'
@@ -770,6 +801,13 @@ class _SetEditorSheetState extends State<SetEditorSheet> {
                     ),
                     onPressed: _toggleSides,
                   ),
+                  IconButton(
+                    tooltip: 'Delete this set',
+                    icon: const Icon(Icons.delete_outline,
+                        size: 24, color: Bv.ink600),
+                    onPressed: _deleteSet,
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: 10),
